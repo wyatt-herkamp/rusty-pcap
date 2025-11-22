@@ -4,6 +4,9 @@ use crate::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHe
 #[derive(Debug)]
 pub struct SyncPcapReader<R: Read> {
     reader: R,
+    /// Buffer for packet data
+    ///
+    /// Allocated to the snap length in the file header
     buffer: Box<[u8]>,
     header_buffer: [u8; 16],
     file_header: PcapFileHeader,
@@ -56,7 +59,6 @@ impl<R: Read> SyncPcapReader<R> {
         )))
     }
 }
-
 #[cfg(test)]
 mod tests {
     use etherparse::{NetSlice, SlicedPacket};
