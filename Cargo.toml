@@ -1,0 +1,21 @@
+[package]
+name = "rusty-pcap"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A Rust library for reading PCAP files"
+repository = "https://github.com/wyatt-herkamp/rusty-pcap"
+authors = ["Wyatt Herkamp <wherkamp@gmail.com>"]
+rust-version = "1.88.0"
+[dependencies]
+thiserror = "2"
+tokio = { version = "1", optional = true, default-features = false, features = [
+  "io-util",
+] }
+futures = { version = "0.3", optional = true }
+
+[features]
+tokio-async = ["tokio", "futures"]
+[dev-dependencies]
+etherparse = "0.19"
+tokio = { version = "1", features = ["full"] }
