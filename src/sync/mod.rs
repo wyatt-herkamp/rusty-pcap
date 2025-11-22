@@ -9,6 +9,11 @@ pub struct SyncPcapReader<R: Read> {
     file_header: PcapFileHeader,
 }
 impl<R: Read> SyncPcapReader<R> {
+    /// Creates a new `SyncPcapReader` from a reader
+    /// Returns `Ok(Self)` on success, or `Err` if there was an error
+    /// reading the file header
+    ///
+    /// A buffer is allocated based on the snap length in the file header
     pub fn new(mut reader: R) -> Result<Self, crate::PcapParseError> {
         let file_header = PcapFileHeader::read(&mut reader)?;
         let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
@@ -35,19 +40,19 @@ impl<R: Read> SyncPcapReader<R> {
             &self.header_buffer,
             self.file_header.magic_number_and_endianness.endianness,
         )?;
-        if packet_header.incl_len > self.file_header.snap_length {
+        if packet_header.include_len > self.file_header.snap_length {
             return Err(PcapParseError::InvalidPacketLength {
                 snap_length: self.file_header.snap_length,
-                incl_len: packet_header.incl_len,
+                incl_len: packet_header.include_len,
             });
         }
         let mut_buffer: &mut [u8] = &mut self.buffer;
         self.reader
-            .read_exact(&mut mut_buffer[0..(packet_header.incl_len as usize)])?;
+            .read_exact(&mut mut_buffer[0..(packet_header.include_len as usize)])?;
 
         Ok(Some((
             packet_header,
-            &self.buffer[..(packet_header.incl_len as usize)],
+            &self.buffer[..(packet_header.include_len as usize)],
         )))
     }
 }

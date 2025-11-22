@@ -1,6 +1,10 @@
-use std::io::{self, ErrorKind, Read};
+use std::io::Read;
 
-use crate::{Endianness, PcapParseError, link_type::LinkType};
+use crate::{
+    PcapParseError,
+    byte_order::{ByteOrder, Endianness, ExtendedByteOrder},
+    link_type::LinkType,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MagicNumber {
@@ -35,7 +39,7 @@ impl TryFrom<[u8; 4]> for MagicNumberAndEndianness {
                 magic_number: MagicNumber::Nanosecond,
                 endianness: Endianness::LittleEndian,
             }),
-            _ => Err(PcapParseError::InvalidMagicNumber(value)),
+            _ => Err(PcapParseError::InvalidMagicNumber(Some(value))),
         }
     }
 }
@@ -44,14 +48,9 @@ impl TryFrom<&[u8]> for MagicNumberAndEndianness {
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() < 4 {
-            return Err(PcapParseError::IO(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "Not enough bytes",
-            )));
+            return Err(PcapParseError::InvalidMagicNumber(None));
         }
-        let array: [u8; 4] = value[0..4].try_into().map_err(|_| {
-            PcapParseError::IO(io::Error::new(ErrorKind::InvalidData, "Slice too short"))
-        })?;
+        let array: [u8; 4] = value[0..4].try_into()?;
         Self::try_from(array)
     }
 }
@@ -61,21 +60,13 @@ pub struct Version {
     minor: u16,
 }
 impl Version {
-    pub fn parse_be(bytes: &[u8]) -> Result<Self, &'static str> {
+    /// Parses the version from the bytes
+    fn parse(bytes: &[u8], byte_order: impl ByteOrder) -> Result<Self, PcapParseError> {
         if bytes.len() < 4 {
-            return Err("Not enough bytes for version");
+            return Err(PcapParseError::InvalidVersion);
         }
-        println!("Bytes: {:?}", bytes);
-        let major = u16::from_be_bytes([bytes[0], bytes[1]]);
-        let minor = u16::from_be_bytes([bytes[2], bytes[3]]);
-        Ok(Self { major, minor })
-    }
-    pub fn parse_le(bytes: &[u8]) -> Result<Self, &'static str> {
-        if bytes.len() < 4 {
-            return Err("Not enough bytes for version");
-        }
-        let major = u16::from_le_bytes([bytes[0], bytes[1]]);
-        let minor = u16::from_le_bytes([bytes[2], bytes[3]]);
+        let major = byte_order.u16_from_bytes([bytes[0], bytes[1]]);
+        let minor = byte_order.u16_from_bytes([bytes[2], bytes[3]]);
         Ok(Self { major, minor })
     }
 }
@@ -97,50 +88,35 @@ pub struct PcapFileHeader {
 }
 
 impl PcapFileHeader {
+    /// Reads the file header from the reader
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapParseError> {
         let mut header = [0u8; 24];
         reader.read_exact(&mut header)?;
-        Self::from_bytes(header)
+        Self::try_from(&header)
     }
-    pub fn from_bytes(bytes: [u8; 24]) -> Result<Self, PcapParseError> {
-        let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
 
-        match magic_number_and_endianness.endianness {
-            Endianness::LittleEndian => Self::read_le(magic_number_and_endianness, &bytes),
-            Endianness::BigEndian => Self::read_be(magic_number_and_endianness, &bytes),
-        }
-    }
-    fn read_be(
-        magic_number_and_endianness: MagicNumberAndEndianness,
-        bytes: &[u8],
-    ) -> Result<Self, PcapParseError> {
-        let version = Version::parse_be(&bytes[4..8])
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid version"))?;
+}
+impl TryFrom<&[u8; 24]> for PcapFileHeader {
+    type Error = PcapParseError;
 
-        let timezone = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
-        let sig_figs = u32::from_be_bytes(bytes[12..16].try_into().unwrap());
-        // Snap length is 4 bytes, so we can safely use u32
-        let snap_length = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
-        let link_type = LinkType::try_from(u32::from_be_bytes(bytes[20..24].try_into().unwrap()))?;
-        Ok(Self {
-            magic_number_and_endianness,
-            version,
-            timezone,
-            sig_figs,
-            snap_length,
-            link_type,
-        })
-    }
-    fn read_le(
-        magic_number_and_endianness: MagicNumberAndEndianness,
-        bytes: &[u8],
-    ) -> Result<Self, PcapParseError> {
-        let version = Version::parse_le(&bytes[4..8])
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid version"))?;
-        let timezone = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-        let sig_figs = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
-        let snap_length: u32 = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
-        let link_type = LinkType::try_from(u32::from_le_bytes(bytes[20..24].try_into().unwrap()))?;
+    fn try_from(bytes: &[u8; 24]) -> Result<Self, Self::Error> {
+          let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
+
+        let version = Version::parse(&bytes[4..8], magic_number_and_endianness.endianness)?;
+        let timezone = magic_number_and_endianness
+            .endianness
+            .try_u32_from_bytes(&bytes[8..12])?;
+        let sig_figs = magic_number_and_endianness
+            .endianness
+            .try_u32_from_bytes(&bytes[12..16])?;
+        let snap_length = magic_number_and_endianness
+            .endianness
+            .try_u32_from_bytes(&bytes[16..20])?;
+        let link_type = LinkType::try_from(
+            magic_number_and_endianness
+                .endianness
+                .try_u32_from_bytes(&bytes[20..24])?,
+        )?;
         Ok(Self {
             magic_number_and_endianness,
             version,

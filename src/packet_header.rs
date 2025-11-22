@@ -1,11 +1,16 @@
 use std::io::Read;
 
-use crate::{Endianness, PcapParseError};
+use crate::{
+    PcapParseError,
+    byte_order::{Endianness, ExtendedByteOrder},
+};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PacketHeader {
     pub ts_sec: u32,
     pub ts_usec: u32,
-    pub incl_len: u32,
+    /// The length of the packet data included in the file
+    pub include_len: u32,
+    /// The original length of the packet data
     pub orig_len: u32,
 }
 impl PacketHeader {
@@ -13,54 +18,30 @@ impl PacketHeader {
         Self {
             ts_sec,
             ts_usec,
-            incl_len,
+            include_len: incl_len,
             orig_len,
         }
     }
+    /// Reads the packet header from the reader
+    /// Returns `Ok(Self)` on success, or `Err` if there was an error
+    /// reading the packet header
+    /// The endianness is used to determine how to read the bytes
+    #[inline(always)]
     pub fn read<R: Read>(reader: &mut R, endianness: Endianness) -> Result<Self, PcapParseError> {
-        match endianness {
-            Endianness::BigEndian => Self::read_big_endian(reader),
-            Endianness::LittleEndian => Self::read_little_endian(reader),
-        }
+        let mut header = [0u8; 16];
+        reader.read_exact(&mut header)?;
+        Self::parse_bytes(&header, endianness)
     }
+    #[inline(always)]
     pub fn parse_bytes(bytes: &[u8; 16], endianness: Endianness) -> Result<Self, PcapParseError> {
-        match endianness {
-            Endianness::BigEndian => Self::parse_be_bytes(bytes),
-            Endianness::LittleEndian => Self::parse_le_bytes(bytes),
-        }
-    }
-    pub fn read_big_endian<R: Read>(reader: &mut R) -> Result<Self, PcapParseError> {
-        let mut header = [0u8; 16];
-        reader.read_exact(&mut header)?;
-        Self::parse_be_bytes(&header)
-    }
-    pub fn parse_be_bytes(bytes: &[u8; 16]) -> Result<Self, PcapParseError> {
-        let ts_sec = u32::from_be_bytes(bytes[0..4].try_into().unwrap());
-        let ts_usec = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
-        let incl_len = u32::from_be_bytes(bytes[8..12].try_into().unwrap());
-        let orig_len = u32::from_be_bytes(bytes[12..16].try_into().unwrap());
+        let ts = endianness.try_u32_from_bytes(&bytes[0..4])?;
+        let ts_usec = endianness.try_u32_from_bytes(&bytes[4..8])?;
+        let incl_len = endianness.try_u32_from_bytes(&bytes[8..12])?;
+        let orig_len = endianness.try_u32_from_bytes(&bytes[12..16])?;
         Ok(Self {
-            ts_sec,
+            ts_sec: ts,
             ts_usec,
-            incl_len,
-            orig_len,
-        })
-    }
-
-    pub fn read_little_endian<R: Read>(reader: &mut R) -> Result<Self, PcapParseError> {
-        let mut header = [0u8; 16];
-        reader.read_exact(&mut header)?;
-        Self::parse_le_bytes(&header)
-    }
-    pub fn parse_le_bytes(bytes: &[u8; 16]) -> Result<Self, PcapParseError> {
-        let ts_sec = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-        let ts_usec = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        let incl_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-        let orig_len = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
-        Ok(Self {
-            ts_sec,
-            ts_usec,
-            incl_len,
+            include_len: incl_len,
             orig_len,
         })
     }
