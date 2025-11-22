@@ -61,10 +61,8 @@ pub struct Version {
 }
 impl Version {
     /// Parses the version from the bytes
+    #[inline(always)]
     fn parse(bytes: &[u8], byte_order: impl ByteOrder) -> Result<Self, PcapParseError> {
-        if bytes.len() < 4 {
-            return Err(PcapParseError::InvalidVersion);
-        }
         let major = byte_order.u16_from_bytes([bytes[0], bytes[1]]);
         let minor = byte_order.u16_from_bytes([bytes[2], bytes[3]]);
         Ok(Self { major, minor })
@@ -94,13 +92,12 @@ impl PcapFileHeader {
         reader.read_exact(&mut header)?;
         Self::try_from(&header)
     }
-
 }
 impl TryFrom<&[u8; 24]> for PcapFileHeader {
     type Error = PcapParseError;
 
     fn try_from(bytes: &[u8; 24]) -> Result<Self, Self::Error> {
-          let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
+        let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
 
         let version = Version::parse(&bytes[4..8], magic_number_and_endianness.endianness)?;
         let timezone = magic_number_and_endianness
