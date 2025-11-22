@@ -17,7 +17,7 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
         let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
         Ok(Self {
             reader,
-            buffer: buffer,
+            buffer,
             file_header,
             header_buffer: [0; 16],
         })
