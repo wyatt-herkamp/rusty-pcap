@@ -76,7 +76,7 @@ impl Block for NameResolutionBlock {
     {
         header.matches_block_id::<Self>()?;
         let byte_order = byte_order
-            .or(header.endianess_from_block::<Self>())
+            .or(header.endianness_from_block::<Self>())
             .ok_or(UndertminedByteOrder)?;
         let block_length = header.block_length_as_u32(byte_order);
         let (records, bytes_read) = Records::read_from_reader(reader, byte_order)?;

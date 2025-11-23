@@ -104,9 +104,14 @@ impl BlockHeader {
         }
         Ok(())
     }
-    /// Should not be used on SectionHeaderBlock
-    #[allow(dead_code)]
-    pub(crate) fn endianess_from_block<B: Block>(&self) -> Option<Endianness> {
+    /// Will panic if the block ID does not match the expected block ID for the given block type
+    pub(crate) fn endianness_from_block<B: Block>(&self) -> Option<Endianness> {
+        debug_assert_ne!(
+            B::block_id_be(),
+            B::block_id_le(),
+            "Unable to determine endianness for {}",
+            std::any::type_name::<B>()
+        );
         if self.block_id == B::block_id_le() {
             Some(Endianness::LittleEndian)
         } else if self.block_id == B::block_id_be() {
@@ -155,5 +160,40 @@ impl PcapNgBlock {
                 reader, header, byte_order,
             )?)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic]
+    fn endianness_from_block_panics() {
+        let block = BlockHeader {
+            block_id: SectionHeaderBlock::block_id_le(),
+            block_length: [0; 4],
+        };
+        block.endianness_from_block::<SectionHeaderBlock>();
+    }
+
+    #[test]
+    fn endianness_from_block() {
+        let block = BlockHeader {
+            block_id: InterfaceDescriptionBlock::block_id_le(),
+            block_length: [0; 4],
+        };
+        assert_eq!(
+            block.endianness_from_block::<InterfaceDescriptionBlock>(),
+            Some(Endianness::LittleEndian)
+        );
+        let block = BlockHeader {
+            block_id: InterfaceDescriptionBlock::block_id_be(),
+            block_length: [0; 4],
+        };
+        assert_eq!(
+            block.endianness_from_block::<InterfaceDescriptionBlock>(),
+            Some(Endianness::BigEndian)
+        );
     }
 }

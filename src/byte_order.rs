@@ -58,16 +58,22 @@ impl ByteOrder for LittleEndian {
 
 /// Represents the endianness of the byte order
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
 pub enum Endianness {
     /// Little-endian byte order
-    #[default]
     LittleEndian,
     /// Big-endian byte order
     BigEndian,
 }
 #[cfg(target_endian = "little")]
+#[allow(clippy::derivable_impls)]
+impl Default for Endianness {
+    fn default() -> Self {
+        Endianness::LittleEndian
+    }
+}
+
 #[cfg(target_endian = "big")]
+#[allow(clippy::derivable_impls)]
 impl Default for Endianness {
     fn default() -> Self {
         Endianness::BigEndian

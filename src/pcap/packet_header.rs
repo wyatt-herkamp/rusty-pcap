@@ -1,7 +1,7 @@
-use std::io::Read;
+use std::io::{Cursor, Read};
 
 use crate::{
-    byte_order::{Endianness, ExtendedByteOrder},
+    byte_order::{Endianness, ReadExt},
     pcap::PcapParseError,
 };
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,10 +34,11 @@ impl PacketHeader {
     }
     #[inline(always)]
     pub fn parse_bytes(bytes: &[u8; 16], endianness: Endianness) -> Result<Self, PcapParseError> {
-        let ts = endianness.try_u32_from_bytes(&bytes[0..4])?;
-        let ts_usec = endianness.try_u32_from_bytes(&bytes[4..8])?;
-        let incl_len = endianness.try_u32_from_bytes(&bytes[8..12])?;
-        let orig_len = endianness.try_u32_from_bytes(&bytes[12..16])?;
+        let mut cursor = Cursor::new(bytes);
+        let ts = cursor.read_u32(endianness)?;
+        let ts_usec = cursor.read_u32(endianness)?;
+        let incl_len = cursor.read_u32(endianness)?;
+        let orig_len = cursor.read_u32(endianness)?;
         Ok(Self {
             ts_sec: ts,
             ts_usec,

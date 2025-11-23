@@ -67,7 +67,7 @@ impl Block for InterfaceDescriptionBlock {
     {
         header.matches_block_id::<Self>()?;
         let byte_order = byte_order
-            .or(header.endianess_from_block::<Self>())
+            .or(header.endianness_from_block::<Self>())
             .ok_or(UndertminedByteOrder)?;
         let mut cursor = Cursor::new(reader.read_bytes::<8>()?);
 

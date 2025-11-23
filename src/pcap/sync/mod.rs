@@ -74,22 +74,22 @@ mod tests {
         while let Ok(Some((header, data))) = reader.next_packet() {
             println!("Packet Header: {:?}", header);
             let parse = SlicedPacket::from_ethernet(data).expect("Failed to parse packet");
-            if let Some(net_slice) = parse.net {
-                match net_slice {
-                    NetSlice::Ipv4(ipv4) => {
-                        println!("IPv4 Packet: {:?}", ipv4.header());
-                        println!("IPv4 Destin: {:?}", ipv4.header().destination_addr());
-                        println!("IPv4 Source: {:?}", ipv4.header().source_addr());
-                    }
-                    NetSlice::Ipv6(ipv6) => {
-                        println!("IPv6 Packet: {:?}", ipv6.header());
-                    }
-                    NetSlice::Arp(arp) => {
-                        println!("ARP Packet: {:?}", arp);
-                    }
+            let Some(net_slice) = parse.net else {
+                panic!("Expected a network layer slice, got: {:?}", parse);
+            };
+
+            match net_slice {
+                NetSlice::Ipv4(ipv4) => {
+                    println!("IPv4 Packet: {:?}", ipv4.header());
+                    println!("IPv4 Destin: {:?}", ipv4.header().destination_addr());
+                    println!("IPv4 Source: {:?}", ipv4.header().source_addr());
                 }
-            } else {
-                println!("Non Packet");
+                NetSlice::Ipv6(ipv6) => {
+                    println!("IPv6 Packet: {:?}", ipv6.header());
+                }
+                NetSlice::Arp(arp) => {
+                    println!("ARP Packet: {:?}", arp);
+                }
             }
         }
     }
