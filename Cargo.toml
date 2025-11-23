@@ -7,6 +7,7 @@ description = "A Rust library for reading PCAP files"
 repository = "https://github.com/wyatt-herkamp/rusty-pcap"
 authors = ["Wyatt Herkamp <wherkamp@gmail.com>"]
 rust-version = "1.88.0"
+documentation = "https://docs.rs/rusty-pcap/latest/rusty_pcap/"
 [dependencies]
 thiserror = "2"
 tokio = { version = "1", optional = true, default-features = false, features = [
