@@ -1,14 +1,20 @@
 //! This is a module for handling byte order in pcap files
 
-use thiserror::Error;
+use std::io::Read;
 
+use thiserror::Error;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("Undetermined endianness")]
+pub struct UndertminedByteOrder;
 /// Represents a trait for byte order operations
-pub(crate) trait ByteOrder: Clone + Copy {
+pub trait ByteOrder: Clone + Copy {
     /// Converts a byte array to a u16
     fn u16_from_bytes(self, bytes: [u8; 2]) -> u16;
 
     /// Converts a byte array to a u32
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32;
+
+    fn u64_from_bytes(self, bytes: [u8; 8]) -> u64;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +26,9 @@ impl ByteOrder for BigEndian {
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32 {
         u32::from_be_bytes(bytes)
     }
+    fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
+        u64::from_be_bytes(bytes)
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LittleEndian;
@@ -29,6 +38,9 @@ impl ByteOrder for LittleEndian {
     }
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32 {
         u32::from_le_bytes(bytes)
+    }
+    fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
+        u64::from_le_bytes(bytes)
     }
 }
 
@@ -49,6 +61,12 @@ impl ByteOrder for Endianness {
         match self {
             Endianness::BigEndian => BigEndian.u32_from_bytes(bytes),
             Endianness::LittleEndian => LittleEndian.u32_from_bytes(bytes),
+        }
+    }
+    fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
+        match self {
+            Endianness::BigEndian => BigEndian.u64_from_bytes(bytes),
+            Endianness::LittleEndian => LittleEndian.u64_from_bytes(bytes),
         }
     }
 }
@@ -91,7 +109,32 @@ impl<B: ByteOrder> ExtendedByteOrder for B {
         Ok(self.u32_from_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 }
+pub trait ReadExt {
+    /// Reads a u16 from the reader
+    fn read_u16<B: ByteOrder>(&mut self, byte_order: B) -> Result<u16, std::io::Error>;
 
+    /// Reads a u32 from the reader
+    fn read_u32<B: ByteOrder>(&mut self, byte_order: B) -> Result<u32, std::io::Error>;
+
+    fn read_bytes<const SIZE: usize>(&mut self) -> Result<[u8; SIZE], std::io::Error>;
+}
+impl<R: Read> ReadExt for R {
+    fn read_u16<B: ByteOrder>(&mut self, byte_order: B) -> Result<u16, std::io::Error> {
+        let mut buffer = [0u8; 2];
+        self.read_exact(&mut buffer)?;
+        Ok(byte_order.u16_from_bytes(buffer))
+    }
+    fn read_u32<B: ByteOrder>(&mut self, byte_order: B) -> Result<u32, std::io::Error> {
+        let mut buffer = [0u8; 4];
+        self.read_exact(&mut buffer)?;
+        Ok(byte_order.u32_from_bytes(buffer))
+    }
+    fn read_bytes<const SIZE: usize>(&mut self) -> Result<[u8; SIZE], std::io::Error> {
+        let mut buffer = [0u8; SIZE];
+        self.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

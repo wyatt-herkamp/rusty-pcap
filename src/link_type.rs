@@ -1,4 +1,7 @@
-use crate::PcapParseError;
+use thiserror::Error;
+#[derive(Debug, Error)]
+#[error("Invalid link type: {0}")]
+pub struct InvalidLinkType(pub u16);
 macro_rules! link_type {
     (
         $(
@@ -14,26 +17,26 @@ macro_rules! link_type {
         }
 
         impl TryFrom<u16> for LinkType {
-            type Error = PcapParseError;
+            type Error = InvalidLinkType;
 
             fn try_from(value: u16) -> Result<Self, Self::Error> {
                 match value {
                     $(
                         $value => Ok(LinkType::$name),
                     )*
-                    _ => Err(PcapParseError::InvalidLinkType(value)),
+                    _ => Err(InvalidLinkType(value)),
                 }
             }
         }
         impl TryFrom<u32> for LinkType {
-            type Error = PcapParseError;
+            type Error = InvalidLinkType;
 
             fn try_from(value: u32) -> Result<Self, Self::Error> {
                 match value {
                     $(
                         $value => Ok(LinkType::$name),
                     )*
-                    _ => Err(PcapParseError::InvalidLinkType(value as u16)),
+                    _ => Err(InvalidLinkType(value as u16)),
                 }
             }
         }

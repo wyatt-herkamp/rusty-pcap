@@ -1,9 +1,9 @@
 use std::io::Read;
 
 use crate::{
-    PcapParseError,
     byte_order::{ByteOrder, Endianness, ExtendedByteOrder},
     link_type::LinkType,
+    pcap::PcapParseError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

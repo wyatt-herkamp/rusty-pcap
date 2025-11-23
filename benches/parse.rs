@@ -1,7 +1,7 @@
 // Generate test with criterion
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use rusty_pcap::sync::SyncPcapReader;
+use rusty_pcap::pcap::sync::SyncPcapReader;
 use std::{fs::File, hint::black_box, io::BufReader};
 
 fn parse_with_rusty_pcap(c: &mut Criterion) {

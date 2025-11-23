@@ -1,4 +1,6 @@
-use crate::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHeader};
+use crate::{
+    pcap::PcapParseError, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
+};
 use tokio::io::{AsyncRead, AsyncReadExt};
 #[derive(Debug)]
 pub struct AsyncPcapReader<R: AsyncRead + Unpin> {
