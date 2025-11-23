@@ -1,9 +1,10 @@
 use std::io::Read;
 
 use crate::{
-    PcapParseError,
-    byte_order::{ByteOrder, Endianness, ExtendedByteOrder},
+    Version,
+    byte_order::{Endianness, ExtendedByteOrder},
     link_type::LinkType,
+    pcap::PcapParseError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,20 +55,6 @@ impl TryFrom<&[u8]> for MagicNumberAndEndianness {
         Self::try_from(array)
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Version {
-    major: u16,
-    minor: u16,
-}
-impl Version {
-    /// Parses the version from the bytes
-    #[inline(always)]
-    fn parse(bytes: &[u8], byte_order: impl ByteOrder) -> Result<Self, PcapParseError> {
-        let major = byte_order.u16_from_bytes([bytes[0], bytes[1]]);
-        let minor = byte_order.u16_from_bytes([bytes[2], bytes[3]]);
-        Ok(Self { major, minor })
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PcapFileHeader {
@@ -99,7 +86,7 @@ impl TryFrom<&[u8; 24]> for PcapFileHeader {
     fn try_from(bytes: &[u8; 24]) -> Result<Self, Self::Error> {
         let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
 
-        let version = Version::parse(&bytes[4..8], magic_number_and_endianness.endianness)?;
+        let version = Version::parse(&bytes[4..8], magic_number_and_endianness.endianness);
         let timezone = magic_number_and_endianness
             .endianness
             .try_u32_from_bytes(&bytes[8..12])?;

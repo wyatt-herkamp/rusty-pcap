@@ -1,8 +1,8 @@
 use std::io::Read;
 
 use crate::{
-    PcapParseError,
     byte_order::{Endianness, ExtendedByteOrder},
+    pcap::PcapParseError,
 };
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PacketHeader {

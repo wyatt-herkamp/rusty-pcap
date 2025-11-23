@@ -1,10 +1,17 @@
-use crate::PcapParseError;
+//! Link types for pcap and pcap-ng files
+//!
+//! Source: https://www.tcpdump.org/linktypes.html
+use thiserror::Error;
+#[derive(Debug, Error)]
+#[error("Invalid link type: {0}")]
+pub struct InvalidLinkType(pub u16);
 macro_rules! link_type {
     (
         $(
             $name:ident = $value:literal
         ),*
     ) => {
+        /// Represents the link type for pcap and pcap-ng files
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(u16)]
         pub enum LinkType {
@@ -14,26 +21,26 @@ macro_rules! link_type {
         }
 
         impl TryFrom<u16> for LinkType {
-            type Error = PcapParseError;
+            type Error = InvalidLinkType;
 
             fn try_from(value: u16) -> Result<Self, Self::Error> {
                 match value {
                     $(
                         $value => Ok(LinkType::$name),
                     )*
-                    _ => Err(PcapParseError::InvalidLinkType(value)),
+                    _ => Err(InvalidLinkType(value)),
                 }
             }
         }
         impl TryFrom<u32> for LinkType {
-            type Error = PcapParseError;
+            type Error = InvalidLinkType;
 
             fn try_from(value: u32) -> Result<Self, Self::Error> {
                 match value {
                     $(
                         $value => Ok(LinkType::$name),
                     )*
-                    _ => Err(PcapParseError::InvalidLinkType(value as u16)),
+                    _ => Err(InvalidLinkType(value as u16)),
                 }
             }
         }
