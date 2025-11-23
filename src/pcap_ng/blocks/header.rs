@@ -1,11 +1,13 @@
+use std::io::Read;
+
 use crate::{
+    Version,
     byte_order::{ByteOrder, Endianness, ReadExt},
     pcap_ng::{
         PCAP_NG_MAGIC, PcapNgParseError,
         blocks::{Block, BlockHeader},
         options::{BlockOptions, define_options_enum},
     },
-    version::Version,
 };
 define_options_enum! {
     enum SHBOptionCodes {
@@ -38,7 +40,7 @@ impl Block for SectionHeaderBlock {
         24 // Minimum size for a Section Header Block
     }
 
-    fn read_with_header<R: std::io::Read>(
+    fn read_with_header<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
         _byte_order: Option<Endianness>,
@@ -81,7 +83,8 @@ impl Block for SectionHeaderBlock {
     }
 }
 impl SectionHeaderBlock {
-    pub fn read_from_reader<R: std::io::Read>(reader: &mut R) -> Result<Self, PcapNgParseError> {
+    /// Reads the entire block from the reader
+    pub fn read_from_reader<R: Read>(reader: &mut R) -> Result<Self, PcapNgParseError> {
         let header = BlockHeader::read(reader)?;
         Self::read_with_header::<_>(reader, &header, None)
     }
@@ -89,35 +92,45 @@ impl SectionHeaderBlock {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
-
     use super::*;
-
     #[test]
-    fn read_from_file() -> anyhow::Result<()> {
-        let mut file = File::open("test_data/ng/test001_le.pcapng")?;
-        let block_header = SectionHeaderBlock::read_from_reader(&mut file)?;
-        //println!("Block Header: {:?}", block_header);
-        let Some(options) = block_header.options else {
-            panic!("No options found in the block header");
-        };
-        for option in options.0 {
-            println!(
-                "Option Code: {}, Length: {}",
-                option.option_code, option.option_length
-            );
-            let code = SHBOptionCodes::try_from(option.option_code);
-            println!("Parsed Option Code: {:?}", code);
+    fn test_parse() -> anyhow::Result<()> {
+        let content = [
+            10, 13, 13, 10, 96, 0, 0, 0, 77, 60, 43, 26, 1, 0, 0, 0, 255, 255, 255, 255, 255, 255,
+            255, 255, 2, 0, 9, 0, 65, 112, 112, 108, 101, 32, 77, 66, 80, 0, 0, 0, 3, 0, 12, 0, 79,
+            83, 45, 88, 32, 49, 48, 46, 49, 48, 46, 53, 4, 0, 15, 0, 112, 99, 97, 112, 95, 119,
+            114, 105, 116, 101, 114, 46, 108, 117, 97, 0, 1, 0, 7, 0, 116, 101, 115, 116, 48, 48,
+            49, 0, 0, 0, 0, 0, 96, 0, 0, 0,
+        ];
+        let mut reader = std::io::Cursor::new(&content);
 
-            match String::from_utf8(option.option_value.clone()) {
-                Ok(ok) => {
-                    println!("Parsed Option Value: {}", ok);
-                }
-                Err(_) => {
-                    println!("Parsed Option Value: {:?}", option.option_value);
-                }
-            };
-        }
+        let block = SectionHeaderBlock::read_from_reader(&mut reader)?;
+        assert_eq!(block.block_length, 96);
+        assert_eq!(block.byte_order, Endianness::LittleEndian);
+        assert_eq!(block.version.major, 1);
+        assert_eq!(block.version.minor, 0);
+        assert_eq!(block.section_length, None);
+        assert!(block.options.is_some());
+        let options = block.options.unwrap();
+        assert_eq!(options.0.len(), 4);
+        assert_eq!(options.0[0].code, SHBOptionCodes::Hardware as u16);
+        assert_eq!(options.0[0].length, 9);
+        assert_eq!(options.0[0].value, b"Apple MBP");
+        assert_eq!(options.0[1].code, SHBOptionCodes::OS as u16);
+        assert_eq!(options.0[1].length, 12);
+        assert_eq!(options.0[1].value, b"OS-X 10.10.5");
+        assert_eq!(options.0[2].code, SHBOptionCodes::UserApplication as u16);
+        assert_eq!(options.0[2].length, 15);
+        assert_eq!(options.0[2].value, b"pcap_writer.lua");
+        assert_eq!(options.0[3].code, 1);
+        assert_eq!(options.0[3].length, 7);
+        assert_eq!(options.0[3].value, b"test001");
+
+        assert_eq!(
+            reader.position(),
+            96,
+            "Reader should be at the end of the block"
+        );
         Ok(())
     }
 }

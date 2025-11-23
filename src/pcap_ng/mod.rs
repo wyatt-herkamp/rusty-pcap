@@ -9,11 +9,18 @@ use crate::{byte_order::Endianness, link_type::InvalidLinkType};
 pub mod blocks;
 pub mod options;
 pub mod sync;
+/// Magic number for pcap-ng files
+///
+/// All pcap-ng files should start with this magic number
 pub const PCAP_NG_MAGIC: [u8; 4] = [0x0A, 0x0D, 0x0D, 0x0A];
 #[derive(Debug, Error)]
 pub enum PcapNgParseError {
-    #[error("Invalid block ID: expected {expected:?}, got {got:?}")]
-    UnexpectedBlockId { expected: [u8; 4], got: [u8; 4] },
+    #[error("Invalid block ID: expected {expected_be:?} or {expected_le:?}, got {got:?}")]
+    UnexpectedBlockId {
+        expected_be: [u8; 4],
+        expected_le: [u8; 4],
+        got: [u8; 4],
+    },
     #[error("Invalid endianness: got {got:?}")]
     InvalidEndianness { got: [u8; 4] },
     /// This should never happen. But preventing panics
@@ -49,5 +56,21 @@ pub(crate) fn pad_length_to_32_bytes(length: usize) -> usize {
         length
     } else {
         length + (4 - (length % 4))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_pad_length_to_32_bytes() {
+        assert_eq!(pad_length_to_32_bytes(0), 0);
+        assert_eq!(pad_length_to_32_bytes(1), 4);
+        assert_eq!(pad_length_to_32_bytes(3), 4);
+        assert_eq!(pad_length_to_32_bytes(4), 4);
+        assert_eq!(pad_length_to_32_bytes(5), 8);
+        assert_eq!(pad_length_to_32_bytes(7), 8);
+        assert_eq!(pad_length_to_32_bytes(8), 8);
+        assert_eq!(pad_length_to_32_bytes(9), 12);
     }
 }

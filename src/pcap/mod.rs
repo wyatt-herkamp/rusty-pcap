@@ -1,3 +1,7 @@
+//! Parsing for PCAP Files based on the libpcap format
+//!
+//! Sources
+//! - [Wireshark Wiki - File Format](https://wiki.wireshark.org/Development/LibpcapFileFormat)
 pub mod file_header;
 pub mod packet_header;
 pub mod sync;

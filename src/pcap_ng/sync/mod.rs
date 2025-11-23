@@ -2,15 +2,21 @@ use std::io::Read;
 
 use crate::pcap_ng::{
     PcapNgParseError,
-    blocks::{BlockHeader, PcapNgBlock, SectionHeaderBlock},
+    blocks::{BlockHeader, InterfaceDescriptionBlock, PcapNgBlock, SectionHeaderBlock},
 };
 
+/// A synchronous reader for PCAP-NG files
 #[derive(Debug)]
-pub struct SyncPcapngReader<R: Read> {
+pub struct SyncPcapNgReader<R: Read> {
     reader: R,
+    /// The current section header block
     current_section: SectionHeaderBlock,
+    /// The interfaces described in the file
+    ///
+    /// Will reset each time a new section header block is read
+    interfaces: Vec<InterfaceDescriptionBlock>,
 }
-impl<R: Read> SyncPcapngReader<R> {
+impl<R: Read> SyncPcapNgReader<R> {
     /// Creates a new `SyncPcapReader` from a reader
     /// Returns `Ok(Self)` on success, or `Err` if there was an error
     /// reading the file header
@@ -21,11 +27,16 @@ impl<R: Read> SyncPcapngReader<R> {
         Ok(Self {
             reader,
             current_section,
+            interfaces: Vec::with_capacity(1),
         })
     }
     /// Returns the file header of the pcap file
     pub fn current_section(&self) -> &SectionHeaderBlock {
         &self.current_section
+    }
+    /// Returns the interfaces described in the file
+    pub fn interfaces(&self) -> &[InterfaceDescriptionBlock] {
+        &self.interfaces
     }
     pub fn next_block(&mut self) -> Result<Option<PcapNgBlock>, PcapNgParseError> {
         let mut header_bytes = [0u8; 8];
@@ -39,8 +50,15 @@ impl<R: Read> SyncPcapngReader<R> {
         let header = BlockHeader::parse_from_bytes(&header_bytes)?;
 
         let result = PcapNgBlock::read(&mut self.reader, &header, self.current_section.byte_order)?;
-        if let PcapNgBlock::SectionHeader(section_header) = &result {
-            self.current_section = section_header.clone();
+        match &result {
+            PcapNgBlock::InterfaceDescription(interface_block) => {
+                self.interfaces.push(interface_block.clone());
+            }
+            PcapNgBlock::SectionHeader(section_header) => {
+                self.interfaces.clear();
+                self.current_section = section_header.clone();
+            }
+            _ => {}
         }
         Ok(Some(result))
     }
@@ -49,14 +67,21 @@ impl<R: Read> SyncPcapngReader<R> {
 mod tests {
     use etherparse::{NetSlice, SlicedPacket};
 
+    use crate::byte_order::Endianness;
+
     use super::*;
     #[test]
     fn read_packets_from_file() -> anyhow::Result<()> {
         let file = std::fs::File::open("test_data/ng/test001_le.pcapng")?;
-        let mut reader = SyncPcapngReader::new(file)?;
+        let mut reader = SyncPcapNgReader::new(file)?;
         assert!(
             reader.current_section.options.is_some(),
             "Section header should have options"
+        );
+        assert_eq!(
+            reader.current_section.byte_order,
+            Endianness::LittleEndian,
+            "Section header should be little-endian"
         );
         while let Ok(Some(block)) = reader.next_block() {
             let packet = match block {

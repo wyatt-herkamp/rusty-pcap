@@ -1,3 +1,4 @@
+//! Block Types for pcap-ng files
 use std::io::Read;
 
 use crate::{
@@ -6,36 +7,47 @@ use crate::{
 };
 
 mod enhanced_packet;
+mod generic;
 mod header;
 mod interface;
 mod name_resolution;
 mod simple_packet;
 pub use enhanced_packet::EnhancedPacket;
+pub use generic::GenericBlock;
 pub use header::{SHBOptionCodes, SectionHeaderBlock};
-pub use interface::InterfaceDescriptionBlock;
+pub use interface::{InterfaceDescriptionBlock, InterfaceOptionCodes};
 pub use name_resolution::NameResolutionBlock;
 pub use simple_packet::SimplePacket;
 pub trait Block {
+    /// Returns the block ID for this block type
     fn block_id() -> u32
     where
         Self: Sized;
+    /// Returns the block ID in little-endian format
     fn block_id_le() -> [u8; 4]
     where
         Self: Sized,
     {
         Self::block_id().to_le_bytes()
     }
+    /// Returns the block ID in big-endian format
     fn block_id_be() -> [u8; 4]
     where
         Self: Sized,
     {
         Self::block_id().to_be_bytes()
     }
-
+    /// Minimum size of the block, including the header
+    ///
+    /// Should be at least 12 bytes for the header and footer.
     fn minimum_size() -> usize {
         12 // Default minimum size for a block header
     }
-
+    /// Reads the block from the reader with the given header and byte order
+    ///
+    /// If byte_order is None, it will be determined from the block header.
+    ///
+    /// For SectionHeaderBlock, the byte order is determined from the first 4 bytes of the blocks content.
     fn read_with_header<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
@@ -56,17 +68,17 @@ impl BlockHeader {
             block_length,
         }
     }
+    /// Returns the block ID as a u32
     pub fn block_id_as_u32(&self, endianness: impl ByteOrder) -> u32 {
         endianness.u32_from_bytes(self.block_id)
     }
+    /// Returns the block length as a u32
     pub fn block_length_as_u32(&self, endianness: impl ByteOrder) -> u32 {
         endianness.u32_from_bytes(self.block_length)
     }
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapNgParseError> {
-        let mut block_id = [0u8; 4];
-        let mut block_length = [0u8; 4];
-        reader.read_exact(&mut block_id)?;
-        reader.read_exact(&mut block_length)?;
+        let block_id = reader.read_bytes::<4>()?;
+        let block_length = reader.read_bytes::<4>()?;
         Ok(Self::new(block_id, block_length))
     }
     pub fn parse_from_bytes(bytes: &[u8]) -> Result<Self, PcapNgParseError> {
@@ -81,11 +93,12 @@ impl BlockHeader {
         let block_length = [bytes[4], bytes[5], bytes[6], bytes[7]];
         Ok(Self::new(block_id, block_length))
     }
-
+    /// Checks if the block ID matches the expected block ID for the given block type
     pub(crate) fn matches_block_id<B: Block>(&self) -> Result<(), PcapNgParseError> {
         if self.block_id != B::block_id_le() && self.block_id != B::block_id_be() {
             return Err(PcapNgParseError::UnexpectedBlockId {
-                expected: B::block_id().to_ne_bytes(),
+                expected_be: B::block_id().to_be_bytes(),
+                expected_le: B::block_id().to_le_bytes(),
                 got: self.block_id,
             });
         }
@@ -103,65 +116,6 @@ impl BlockHeader {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GenericBlock {
-    pub block_id: u32,
-    pub block_length: u32,
-    pub data: Option<Vec<u8>>,
-}
-impl GenericBlock {
-    pub fn new(block_id: u32, block_length: u32, data: Option<Vec<u8>>) -> Self {
-        Self {
-            block_id,
-            block_length,
-            data,
-        }
-    }
-    pub fn read_with_header<R: Read>(
-        reader: &mut R,
-        header: &BlockHeader,
-        byte_order: Endianness,
-    ) -> Result<Self, PcapNgParseError> {
-        let block_length = header.block_length_as_u32(byte_order);
-        let data = if block_length > 12 {
-            let mut data = vec![0u8; (block_length - 12) as usize];
-            reader.read_exact(&mut data)?;
-            Some(data)
-        } else {
-            None
-        };
-
-        reader.read_bytes::<4>()?;
-        Ok(Self {
-            block_id: header.block_id_as_u32(byte_order),
-            block_length,
-            data,
-        })
-    }
-    pub fn read<R: Read, B: ByteOrder>(
-        reader: &mut R,
-        byte_order: B,
-    ) -> Result<Self, PcapNgParseError> {
-        let header = BlockHeader::read(reader)?;
-
-        let length = header.block_length_as_u32(byte_order);
-        let data = if length > 12 {
-            let mut data = vec![0u8; (length - 12) as usize];
-            reader.read_exact(&mut data)?;
-            Some(data)
-        } else {
-            None
-        };
-
-        reader.read_bytes::<4>()?;
-        Ok(Self {
-            block_id: header.block_id_as_u32(byte_order),
-            block_length: length,
-            data,
-        })
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PcapNgBlock {
     SectionHeader(SectionHeaderBlock),

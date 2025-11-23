@@ -6,9 +6,33 @@ use crate::{
     pcap_ng::{
         PcapNgParseError,
         blocks::{Block, BlockHeader},
-        options::BlockOptions,
+        options::{BlockOptions, define_options_enum},
     },
 };
+define_options_enum! {
+    /// Options for the Interface Description Block
+    enum InterfaceOptionCodes {
+        /// The if_name option is a UTF-8 string containing the name of the device used to capture data. The string is not zero-terminated.
+        IfName = 2,
+        /// The if_description option is a UTF-8 string containing the description of the device used to capture data. The string is not zero-terminated.
+        IfDescription = 3,
+        IfIPv4Address = 4,
+        IfIPv6Address = 5,
+        IfMACAddress = 6,
+        IfEuiAddr = 7,
+        /// The if_speed option is a 64-bit unsigned value indicating the interface speed, in bits per second.
+        IfSpeed = 8,
+        IfTimestampResolution = 9,
+        IfTZone = 10,
+        IfFilter = 11,
+        IfOS = 12,
+        IfFcsLength = 13,
+        IfTsOffset = 14,
+        IfHardware = 15,
+        IfTxSpeed = 16,
+        IfRxSpeed = 17,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceDescriptionBlock {
@@ -29,7 +53,8 @@ impl Block for InterfaceDescriptionBlock {
         [0x00, 0x00, 0x00, 0x01] //  Interface ID for SHB
     }
     fn minimum_size() -> usize {
-        16
+        // 12 base + 2 for link_type + 2 for reserved + 4 for snap_length
+        20
     }
 
     fn read_with_header<R: Read>(
@@ -51,7 +76,8 @@ impl Block for InterfaceDescriptionBlock {
         let snap_length = cursor.read_u32(byte_order)?;
 
         let block_length = header.block_length_as_u32(byte_order);
-        let options_space = block_length as usize - 12;
+        let options_space = block_length as usize - Self::minimum_size();
+
         let options = if options_space > 0 {
             BlockOptions::read_option(reader, byte_order)?
         } else {
@@ -77,43 +103,37 @@ impl InterfaceDescriptionBlock {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, io::Seek};
 
-    use crate::pcap_ng::blocks::{
-        header::SectionHeaderBlock, interface::InterfaceDescriptionBlock,
+    use crate::{
+        byte_order::Endianness,
+        pcap_ng::blocks::{InterfaceOptionCodes, interface::InterfaceDescriptionBlock},
     };
-
     #[test]
-    fn read_from_file() -> anyhow::Result<()> {
-        let mut file = File::open("test_data/ng/test001_le.pcapng")?;
-        let block_header = SectionHeaderBlock::read_from_reader(&mut file)?;
-        //println!("Block Header: {:?}", block_header);
-        println!("Reading Interface Description Block...");
+    fn parse_bytes() -> anyhow::Result<()> {
+        let content = [
+            1, 0, 0, 0, 52, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 24, 0, 115, 105, 108, 108, 121,
+            32, 101, 116, 104, 101, 114, 110, 101, 116, 32, 105, 110, 116, 101, 114, 102, 97, 99,
+            101, 0, 0, 0, 0, 52, 0, 0, 0,
+        ];
+        let mut reader = std::io::Cursor::new(&content);
+        let interface = InterfaceDescriptionBlock::read(&mut reader, Endianness::LittleEndian)?;
 
-        let interface_block = InterfaceDescriptionBlock::read(&mut file, block_header.byte_order)?;
-        println!("Interface Block: {:?}", interface_block);
-        let Some(options) = interface_block.options else {
-            panic!("No options found in the interface block");
-        };
-        for option in options.0 {
-            println!(
-                "Option Code: {}, Length: {}",
-                option.option_code, option.option_length
-            );
-            //let code = SHBOptionCodes::try_from(option.option_code);
-            //println!("Parsed Option Code: {:?}", code);
+        assert_eq!(interface.block_length, 52);
+        assert_eq!(interface.link_type, crate::link_type::LinkType::Ethernet);
+        assert_eq!(interface.reserved, [0, 0]);
+        assert_eq!(interface.snap_length, 0);
+        assert!(interface.options.is_some());
+        let options = interface.options.unwrap();
+        assert_eq!(options.0.len(), 1);
+        assert_eq!(options.0[0].code, 2);
+        assert_eq!(
+            InterfaceOptionCodes::try_from(options.0[0].code),
+            Ok(InterfaceOptionCodes::IfName)
+        );
+        assert_eq!(options.0[0].length, 24);
+        assert_eq!(options.0[0].value, b"silly ethernet interface");
 
-            match String::from_utf8(option.option_value.clone()) {
-                Ok(ok) => {
-                    println!("Parsed Option Value: {}", ok);
-                }
-                Err(_) => {
-                    println!("Parsed Option Value: {:?}", option.option_value);
-                }
-            };
-        }
-        let cursor_pos = file.stream_position()?;
-        println!("Current file position: {}", cursor_pos);
+        assert_eq!(reader.position(), 52);
         Ok(())
     }
 }

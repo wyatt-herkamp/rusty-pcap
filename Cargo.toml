@@ -18,10 +18,12 @@ futures = { version = "0.3", optional = true }
 tokio-async = ["tokio", "futures"]
 [dev-dependencies]
 anyhow = "1.0"
+# Used Internally to make sure the packets are not malformed
 etherparse = "0.19"
 tokio = { version = "1", features = ["full"] }
 criterion = "0.7"
 pcap = { version = "2" }
+clap = { version = "4", features = ["derive"] }
 
 [[bench]]
 name = "parse"

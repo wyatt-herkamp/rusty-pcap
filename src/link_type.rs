@@ -1,3 +1,6 @@
+//! Link types for pcap and pcap-ng files
+//!
+//! Source: https://www.tcpdump.org/linktypes.html
 use thiserror::Error;
 #[derive(Debug, Error)]
 #[error("Invalid link type: {0}")]
@@ -8,6 +11,7 @@ macro_rules! link_type {
             $name:ident = $value:literal
         ),*
     ) => {
+        /// Represents the link type for pcap and pcap-ng files
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         #[repr(u16)]
         pub enum LinkType {
