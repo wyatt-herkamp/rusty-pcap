@@ -30,7 +30,7 @@ impl ByteOrder for BigEndian {
         u32::from_be_bytes(bytes)
     }
     fn u32_to_bytes(self, value: u32) -> [u8; 4] {
-        value.to_le_bytes()
+        value.to_be_bytes()
     }
     fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
         u64::from_be_bytes(bytes)
@@ -57,6 +57,10 @@ impl ByteOrder for LittleEndian {
 }
 
 /// Represents the endianness of the byte order
+///
+/// ## Note
+///
+/// Default is based on the system. SO using default should not be used in tests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {
     /// Little-endian byte order

@@ -175,3 +175,9 @@ link_type! {
     Usb2_0 = 288,
     AtscAlp = 289
 }
+#[allow(clippy::derivable_impls)]
+impl Default for LinkType {
+    fn default() -> Self {
+        LinkType::Null
+    }
+}

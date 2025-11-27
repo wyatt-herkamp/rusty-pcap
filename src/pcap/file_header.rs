@@ -1,26 +1,27 @@
-use std::io::Read;
+use std::io::{Cursor, Read, Write};
 
 use crate::{
     Version,
-    byte_order::{Endianness, ExtendedByteOrder},
+    byte_order::{Endianness, ExtendedByteOrder, WriteExt},
     link_type::LinkType,
-    pcap::PcapParseError,
+    pcap::PcapHeader,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MagicNumber {
+    #[default]
     Microsecond,
     Nanosecond,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MagicNumberAndEndianness {
     pub magic_number: MagicNumber,
     pub endianness: Endianness,
 }
 
 impl TryFrom<[u8; 4]> for MagicNumberAndEndianness {
-    type Error = PcapParseError;
+    type Error = PcapHeader;
 
     fn try_from(value: [u8; 4]) -> Result<Self, Self::Error> {
         match value {
@@ -40,16 +41,26 @@ impl TryFrom<[u8; 4]> for MagicNumberAndEndianness {
                 magic_number: MagicNumber::Nanosecond,
                 endianness: Endianness::LittleEndian,
             }),
-            _ => Err(PcapParseError::InvalidMagicNumber(Some(value))),
+            _ => Err(PcapHeader::InvalidMagicNumber(Some(value))),
+        }
+    }
+}
+impl From<MagicNumberAndEndianness> for [u8; 4] {
+    fn from(value: MagicNumberAndEndianness) -> Self {
+        match (value.magic_number, value.endianness) {
+            (MagicNumber::Microsecond, Endianness::LittleEndian) => [0xd4, 0xc3, 0xb2, 0xa1],
+            (MagicNumber::Microsecond, Endianness::BigEndian) => [0xa1, 0xb2, 0xc3, 0xd4],
+            (MagicNumber::Nanosecond, Endianness::LittleEndian) => [0xA1, 0xB2, 0x3C, 0x4D],
+            (MagicNumber::Nanosecond, Endianness::BigEndian) => [0x4d, 0x3c, 0xb2, 0xa1],
         }
     }
 }
 impl TryFrom<&[u8]> for MagicNumberAndEndianness {
-    type Error = PcapParseError;
+    type Error = PcapHeader;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() < 4 {
-            return Err(PcapParseError::InvalidMagicNumber(None));
+            return Err(PcapHeader::InvalidMagicNumber(None));
         }
         let array: [u8; 4] = value[0..4].try_into()?;
         Self::try_from(array)
@@ -71,17 +82,33 @@ pub struct PcapFileHeader {
     /// 20..24
     pub link_type: LinkType,
 }
-
+impl Default for PcapFileHeader {
+    fn default() -> Self {
+        Self {
+            magic_number_and_endianness: MagicNumberAndEndianness::default(),
+            version: Version { major: 2, minor: 4 },
+            timezone: Default::default(),
+            sig_figs: Default::default(),
+            snap_length: Default::default(),
+            link_type: Default::default(),
+        }
+    }
+}
 impl PcapFileHeader {
     /// Reads the file header from the reader
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapParseError> {
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapHeader> {
         let mut header = [0u8; 24];
         reader.read_exact(&mut header)?;
         Self::try_from(&header)
     }
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        let as_bytes: [u8; 24] = self.into();
+        writer.write_all(&as_bytes)?;
+        Ok(())
+    }
 }
 impl TryFrom<&[u8; 24]> for PcapFileHeader {
-    type Error = PcapParseError;
+    type Error = PcapHeader;
 
     fn try_from(bytes: &[u8; 24]) -> Result<Self, Self::Error> {
         let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;
@@ -111,6 +138,27 @@ impl TryFrom<&[u8; 24]> for PcapFileHeader {
         })
     }
 }
+impl<'a> From<&'a PcapFileHeader> for [u8; 24] {
+    fn from(value: &'a PcapFileHeader) -> Self {
+        // It is impossible for these write calls to error out.
+        let mut header = Cursor::new([0u8; 24]);
+        let magic_number: [u8; 4] = value.magic_number_and_endianness.into();
+        let _ = header.write_all(&magic_number);
+        let endianness = value.magic_number_and_endianness.endianness;
+        let _ = value.version.write(&mut header, endianness);
+        let _ = header.write_u32(value.timezone, endianness);
+        let _ = header.write_u32(value.sig_figs, endianness);
+        let _ = header.write_u32(value.snap_length, endianness);
+        let _ = header.write_u32((value.link_type as u16).into(), endianness);
+        header.into_inner()
+    }
+}
+
+impl From<PcapFileHeader> for [u8; 24] {
+    fn from(value: PcapFileHeader) -> Self {
+        (&value).into()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -138,5 +186,27 @@ mod tests {
             Endianness::LittleEndian
         );
         println!("{:?}", header);
+    }
+
+    #[test]
+    fn test_header_write() {
+        let header = PcapFileHeader {
+            magic_number_and_endianness: MagicNumberAndEndianness {
+                magic_number: MagicNumber::Microsecond,
+                endianness: Endianness::BigEndian,
+            },
+            version: Version { major: 2, minor: 6 },
+            timezone: 1,
+            sig_figs: 2,
+            snap_length: 100,
+            link_type: LinkType::Ethernet,
+        };
+
+        let as_bytes: [u8; 24] = header.into();
+
+        let from_bytes =
+            PcapFileHeader::try_from(&as_bytes).expect("Unable to parse written header");
+
+        assert_eq!(header, from_bytes)
     }
 }

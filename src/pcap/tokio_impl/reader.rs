@@ -1,5 +1,5 @@
 use crate::{
-    pcap::PcapParseError, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
+    pcap::PcapHeader, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 #[derive(Debug)]
@@ -17,7 +17,7 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
     /// reading the file header
     ///
     /// A buffer is allocated based on the snap length in the file header
-    pub async fn new(mut reader: R) -> Result<Self, PcapParseError> {
+    pub async fn new(mut reader: R) -> Result<Self, PcapHeader> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
         let file_header = PcapFileHeader::try_from(&file_header)?;
@@ -36,12 +36,12 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
     /// Reads the next packet from the pcap file
     /// Returns `Ok(None)` if there are no more packets to read
     /// Returns `Err` if there was an error reading the packet
-    pub async fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapParseError> {
+    pub async fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapHeader> {
         if let Err(err) = self.reader.read_exact(&mut self.header_buffer).await {
             if err.kind() == std::io::ErrorKind::UnexpectedEof {
                 return Ok(None); // No more packets
             } else {
-                return Err(PcapParseError::IO(err));
+                return Err(PcapHeader::IO(err));
             }
         }
         let packet_header = PacketHeader::parse_bytes(
@@ -51,7 +51,7 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
         // Check if the included length is greater than the snap length
         // This is a sanity check to prevent reading more data than allocated
         if packet_header.include_len > self.file_header.snap_length {
-            return Err(PcapParseError::InvalidPacketLength {
+            return Err(PcapHeader::InvalidPacketLength {
                 snap_length: self.file_header.snap_length,
                 incl_len: packet_header.include_len,
             });

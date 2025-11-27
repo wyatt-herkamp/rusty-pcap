@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 
 #[derive(Debug, Error)]
-pub enum PcapParseError {
+pub enum PcapHeader {
     #[error(transparent)]
     IO(#[from] std::io::Error),
     #[error("Invalid magic number got {0:?}")]
