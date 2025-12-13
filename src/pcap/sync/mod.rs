@@ -1,3 +1,4 @@
+//! Synchronous PCAP reader and writer
 use std::io::Read;
 pub mod writer;
 use crate::{
@@ -44,6 +45,7 @@ impl<R: Read> SyncPcapReader<R> {
         let packet_header = PacketHeader::parse_bytes(
             &self.header_buffer,
             self.file_header.magic_number_and_endianness.endianness,
+            &self.file_header.version,
         )?;
         if packet_header.include_len > self.file_header.snap_length {
             return Err(PcapHeader::InvalidPacketLength {

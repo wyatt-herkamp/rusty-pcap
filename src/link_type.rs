@@ -1,6 +1,6 @@
 //! Link types for pcap and pcap-ng files
 //!
-//! Source: https://www.tcpdump.org/linktypes.html
+//! Source: <https://www.tcpdump.org/linktypes.html>
 use thiserror::Error;
 #[derive(Debug, Error)]
 #[error("Invalid link type: {0}")]

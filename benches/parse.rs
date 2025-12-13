@@ -1,5 +1,6 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
 // Generate test with criterion
-
 use criterion::{Criterion, criterion_group, criterion_main};
 use rusty_pcap::pcap::sync::SyncPcapReader;
 use std::{fs::File, hint::black_box, io::BufReader};
@@ -7,7 +8,7 @@ use std::{fs::File, hint::black_box, io::BufReader};
 fn parse_with_rusty_pcap(c: &mut Criterion) {
     c.bench_function("parse_with_rusty_pcap", |b| {
         b.iter(|| {
-            let file = File::open("test_data/test.pcap").expect("Failed to open test.pcap");
+            let file = File::open("test_data/test.pcap").unwrap();
             let packets = SyncPcapReader::new(BufReader::new(file));
             let mut packets = packets.unwrap();
             while let Ok(Some((_header, _data))) = black_box(packets.next_packet()) {

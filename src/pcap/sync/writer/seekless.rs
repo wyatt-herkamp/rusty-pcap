@@ -1,38 +1,21 @@
-use std::io::{self, Seek, Write};
-pub mod seekless;
+use std::io::{self, Write};
+
 use crate::pcap::{
-    file_header::PcapFileHeader,
-    packet_header::{PacketHeader, PacketTimestamp},
+    file_header::PcapFileHeader, packet_header::PacketHeader, sync::writer::NewPacketHeader,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct NewPacketHeader {
-    pub timestamp: PacketTimestamp,
-    /// The original length of the packet data
-    pub orig_len: Option<u32>,
-}
-/// A Sync Pcap Writer
+/// A Sync Pcap Writer that does not require Seek
 ///
-/// ## Why is Seek Required?
-///
-/// If you write a packet larger than the snap_length then the header has to be rewritten
-///
-/// A seekless version is available in the `seekless` module
-pub struct SyncPcapWriter<W: Write + Seek> {
+/// If a packet larger than snap_length is written an error is returned
+pub struct SeeklessPcapWriter<W: Write> {
     target: W,
     header: PcapFileHeader,
-    /// If a written packet size exceeds snap_len then this will flip to true
-    requires_header_rewrite: bool,
 }
 
-impl<W: Write + Seek> SyncPcapWriter<W> {
+impl<W: Write> SeeklessPcapWriter<W> {
     pub fn new(mut target: W, header: PcapFileHeader) -> Result<Self, io::Error> {
         header.write(&mut target)?;
-        Ok(Self {
-            target,
-            header,
-            requires_header_rewrite: false,
-        })
+        Ok(Self { target, header })
     }
 
     pub fn write_header(
@@ -46,8 +29,10 @@ impl<W: Write + Seek> SyncPcapWriter<W> {
             orig_len: header.orig_len.unwrap_or(content.len() as u32),
         };
         if new_header.include_len > self.header.snap_length {
-            self.requires_header_rewrite = true;
-            self.header.snap_length = self.header.snap_length.max(new_header.include_len);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Packet length exceeds snap length",
+            ));
         }
 
         new_header.write(
@@ -58,33 +43,9 @@ impl<W: Write + Seek> SyncPcapWriter<W> {
         self.target.write_all(content)?;
         Ok(())
     }
-
     pub fn finish(mut self) -> Result<(), io::Error> {
         self.target.flush()?;
-        self.update_snap_length()?;
         Ok(())
-    }
-    /// Consumes the writer and returns the underlying target
-    ///
-    /// Warning: this will not update the header even if packets larger than snap_length were written
-    pub fn into_inner(self) -> W {
-        self.target
-    }
-    /// Seeks back to the start and updates the snap_length in the header if required
-    /// Returns `Ok(true)` if the header was rewritten, `Ok(false)` if no rewrite was necessary
-    ///
-    /// Will seek back to the end of the file after updating
-    pub fn update_snap_length(&mut self) -> Result<bool, io::Error> {
-        if !self.requires_header_rewrite {
-            return Ok(false);
-        }
-
-        self.target.seek(io::SeekFrom::Start(0))?;
-
-        self.header.write(&mut self.target)?;
-        self.requires_header_rewrite = false;
-        self.target.seek(io::SeekFrom::End(0))?;
-        Ok(true)
     }
 }
 
@@ -110,7 +71,8 @@ mod tests {
 
     #[test]
     fn test_write() -> anyhow::Result<()> {
-        let (actual, expected) = crate::test_helpers::test_files("sync_writer_basic.pcap")?;
+        let (actual, expected) =
+            crate::test_helpers::test_files("seekless_sync_writer_basic.pcap")?;
         let mut packets_written = Vec::with_capacity(100);
 
         {
@@ -124,6 +86,7 @@ mod tests {
                         endianness: Endianness::LittleEndian,
                         magic_number: MagicNumber::Microsecond,
                     },
+                    snap_length: 65535,
                     ..Default::default()
                 },
             )?;

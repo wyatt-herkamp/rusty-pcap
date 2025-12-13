@@ -1,3 +1,4 @@
+//! PCAP file header representation and parsing
 use std::io::{Cursor, Read, Write};
 
 use crate::{
@@ -7,16 +8,22 @@ use crate::{
     pcap::PcapHeader,
 };
 
+/// The magic number used to identify pcap files and their endianness
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MagicNumber {
+    /// Microsecond Resolution
     #[default]
     Microsecond,
+    /// Nanosecond Resolution
     Nanosecond,
 }
 
+/// Represents the magic number and endianness of a pcap file
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MagicNumberAndEndianness {
+    /// The magic number identifying the pcap file format and timestamp resolution
     pub magic_number: MagicNumber,
+    /// The endianness of the file
     pub endianness: Endianness,
 }
 
@@ -66,27 +73,33 @@ impl TryFrom<&[u8]> for MagicNumberAndEndianness {
         Self::try_from(array)
     }
 }
-
+/// Represents the file header of a pcap file
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PcapFileHeader {
     /// First 4 bytes are the magic number and endianness
     pub magic_number_and_endianness: MagicNumberAndEndianness,
-    /// 4..8
+    /// The version of the pcap file format
+    /// Bytes 4..8
     pub version: Version,
-    /// 8..12
+    /// The timezone offset
+    /// Bytes 8..12
     pub timezone: u32,
-    /// 12..16
+    /// The number of significant figures
+    /// Bytes 12..16
     pub sig_figs: u32,
-    /// 16..20
+    /// The maximum byte length of captured packets
+    ///
+    /// Bytes 16..20
     pub snap_length: u32,
-    /// 20..24
+    /// The link type of the captured packets
+    /// Bytes 20..24
     pub link_type: LinkType,
 }
 impl Default for PcapFileHeader {
     fn default() -> Self {
         Self {
             magic_number_and_endianness: MagicNumberAndEndianness::default(),
-            version: Version { major: 2, minor: 4 },
+            version: Version::PCAP_VERSION_2_4,
             timezone: Default::default(),
             sig_figs: Default::default(),
             snap_length: Default::default(),
@@ -101,6 +114,7 @@ impl PcapFileHeader {
         reader.read_exact(&mut header)?;
         Self::try_from(&header)
     }
+    /// Writes the file header to the writer
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         let as_bytes: [u8; 24] = self.into();
         writer.write_all(&as_bytes)?;

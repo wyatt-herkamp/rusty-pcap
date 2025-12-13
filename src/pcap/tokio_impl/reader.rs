@@ -1,3 +1,4 @@
+//! Asynchronous reader for PCAP files
 use crate::{
     pcap::PcapHeader, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
 };
@@ -47,6 +48,7 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
         let packet_header = PacketHeader::parse_bytes(
             &self.header_buffer,
             self.file_header.magic_number_and_endianness.endianness,
+            &self.file_header.version,
         )?;
         // Check if the included length is greater than the snap length
         // This is a sanity check to prevent reading more data than allocated

@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 
+/// Errors that can occur when parsing or writing pcap files
 #[derive(Debug, Error)]
 pub enum PcapHeader {
     #[error(transparent)]

@@ -2,7 +2,7 @@
 //! rusty-pcap is a pcap library for Rust
 //!
 //! 100% Rust implementation of a pcap reader
-use std::io::Write;
+use std::{cmp, io::Write};
 
 use crate::{
     byte_order::{ByteOrder, WriteExt},
@@ -38,12 +38,33 @@ impl PcapFileType {
     }
 }
 
+/// Represents the version of the pcap file format
+///
+/// Also used in pcap-ng files for the section header block
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Version {
+    /// Major version
     pub major: u16,
+    /// Minor version
     pub minor: u16,
 }
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.major
+            .cmp(&other.major)
+            .then_with(|| self.minor.cmp(&other.minor))
+    }
+}
 impl Version {
+    /// The current version of libpcap is 2.4
+    pub const PCAP_VERSION_2_4: Version = Version { major: 2, minor: 4 };
+    /// The libpcap version 2.3
+    pub const PCAP_VERSION_2_3: Version = Version { major: 2, minor: 3 };
     /// Parses the version from the bytes
     #[inline(always)]
     pub(crate) fn parse(bytes: &[u8], byte_order: impl ByteOrder) -> Self {
@@ -71,6 +92,8 @@ pub(crate) mod test_helpers {
     };
 
     use anyhow::{Result, anyhow};
+
+    use crate::Version;
 
     pub fn test_target_dir() -> Result<PathBuf> {
         let base_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -118,5 +141,16 @@ pub(crate) mod test_helpers {
         assert_eq!(actual_bytes, expected_bytes);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_version_cmp() {
+        let v2_4 = Version { major: 2, minor: 4 };
+        let v2_3 = Version { major: 2, minor: 3 };
+        let v2_1 = Version { major: 1, minor: 1 };
+
+        assert!(v2_4 > v2_3);
+        assert!(v2_3 > v2_1);
+        assert!(v2_4 > v2_1);
     }
 }
