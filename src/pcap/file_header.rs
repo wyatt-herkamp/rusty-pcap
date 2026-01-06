@@ -5,7 +5,7 @@ use crate::{
     Version,
     byte_order::{Endianness, ExtendedByteOrder, WriteExt},
     link_type::LinkType,
-    pcap::PcapHeader,
+    pcap::PcapParseError,
 };
 
 /// The magic number used to identify pcap files and their endianness
@@ -28,7 +28,7 @@ pub struct MagicNumberAndEndianness {
 }
 
 impl TryFrom<[u8; 4]> for MagicNumberAndEndianness {
-    type Error = PcapHeader;
+    type Error = PcapParseError;
 
     fn try_from(value: [u8; 4]) -> Result<Self, Self::Error> {
         match value {
@@ -48,7 +48,7 @@ impl TryFrom<[u8; 4]> for MagicNumberAndEndianness {
                 magic_number: MagicNumber::Nanosecond,
                 endianness: Endianness::LittleEndian,
             }),
-            _ => Err(PcapHeader::InvalidMagicNumber(Some(value))),
+            _ => Err(PcapParseError::InvalidMagicNumber(Some(value))),
         }
     }
 }
@@ -63,11 +63,11 @@ impl From<MagicNumberAndEndianness> for [u8; 4] {
     }
 }
 impl TryFrom<&[u8]> for MagicNumberAndEndianness {
-    type Error = PcapHeader;
+    type Error = PcapParseError;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() < 4 {
-            return Err(PcapHeader::InvalidMagicNumber(None));
+            return Err(PcapParseError::InvalidMagicNumber(None));
         }
         let array: [u8; 4] = value[0..4].try_into()?;
         Self::try_from(array)
@@ -109,7 +109,7 @@ impl Default for PcapFileHeader {
 }
 impl PcapFileHeader {
     /// Reads the file header from the reader
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapHeader> {
+    pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapParseError> {
         let mut header = [0u8; 24];
         reader.read_exact(&mut header)?;
         Self::try_from(&header)
@@ -122,7 +122,7 @@ impl PcapFileHeader {
     }
 }
 impl TryFrom<&[u8; 24]> for PcapFileHeader {
-    type Error = PcapHeader;
+    type Error = PcapParseError;
 
     fn try_from(bytes: &[u8; 24]) -> Result<Self, Self::Error> {
         let magic_number_and_endianness = MagicNumberAndEndianness::try_from(&bytes[0..4])?;

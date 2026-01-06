@@ -13,7 +13,7 @@ use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 
 /// Errors that can occur when parsing or writing pcap files
 #[derive(Debug, Error)]
-pub enum PcapHeader {
+pub enum PcapParseError {
     #[error(transparent)]
     IO(#[from] std::io::Error),
     #[error("Invalid magic number got {0:?}")]

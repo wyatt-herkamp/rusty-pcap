@@ -2,7 +2,7 @@
 use std::io::Read;
 pub mod writer;
 use crate::{
-    pcap::PcapHeader, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
+    pcap::PcapParseError, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
 };
 #[derive(Debug)]
 pub struct SyncPcapReader<R: Read> {
@@ -20,7 +20,7 @@ impl<R: Read> SyncPcapReader<R> {
     /// reading the file header
     ///
     /// A buffer is allocated based on the snap length in the file header
-    pub fn new(mut reader: R) -> Result<Self, PcapHeader> {
+    pub fn new(mut reader: R) -> Result<Self, PcapParseError> {
         let file_header = PcapFileHeader::read(&mut reader)?;
         let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
         Ok(Self {
@@ -34,12 +34,12 @@ impl<R: Read> SyncPcapReader<R> {
     pub fn file_header(&self) -> &PcapFileHeader {
         &self.file_header
     }
-    pub fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapHeader> {
+    pub fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapParseError> {
         if let Err(err) = self.reader.read_exact(&mut self.header_buffer) {
             if err.kind() == std::io::ErrorKind::UnexpectedEof {
                 return Ok(None); // No more packets
             } else {
-                return Err(PcapHeader::IO(err));
+                return Err(PcapParseError::IO(err));
             }
         }
         let packet_header = PacketHeader::parse_bytes(
@@ -48,7 +48,7 @@ impl<R: Read> SyncPcapReader<R> {
             &self.file_header.version,
         )?;
         if packet_header.include_len > self.file_header.snap_length {
-            return Err(PcapHeader::InvalidPacketLength {
+            return Err(PcapParseError::InvalidPacketLength {
                 snap_length: self.file_header.snap_length,
                 incl_len: packet_header.include_len,
             });

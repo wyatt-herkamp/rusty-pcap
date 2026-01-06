@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Version,
     byte_order::{Endianness, ReadExt, WriteExt},
-    pcap::PcapHeader,
+    pcap::PcapParseError,
 };
 /// Represents the timestamp of a packet
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,7 +76,7 @@ impl PacketHeader {
         reader: &mut R,
         endianness: Endianness,
         version: &Version,
-    ) -> Result<Self, PcapHeader> {
+    ) -> Result<Self, PcapParseError> {
         let mut header = [0u8; 16];
         reader.read_exact(&mut header)?;
         Self::parse_bytes(&header, endianness, version)
@@ -86,7 +86,7 @@ impl PacketHeader {
         bytes: &[u8; 16],
         endianness: Endianness,
         version: &Version,
-    ) -> Result<Self, PcapHeader> {
+    ) -> Result<Self, PcapParseError> {
         let mut cursor = Cursor::new(bytes);
         let ts = cursor.read_u32(endianness)?;
         let ts_usec = cursor.read_u32(endianness)?;
