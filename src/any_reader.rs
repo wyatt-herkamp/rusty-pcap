@@ -22,7 +22,7 @@ pub enum AnyPcapReaderError {
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
-
+#[derive(Debug)]
 enum SyncAnyPcapReaderInner<R: std::io::Read> {
     Pcap(SyncPcapReader<R>),
     PcapNg(SyncPcapNgReader<R>),
@@ -72,6 +72,24 @@ impl<R: Read> SyncAnyPcapReaderInner<R> {
 }
 pub type AnyPcapPacket<'a> = (AnyPacketHeader, Cow<'a, [u8]>);
 /// A reader that can read both pcap and pcapng files
+///
+/// # When Should I use this?
+///
+/// When the only requirement is to read packets from either pcap or pcapng files,
+/// and you do not need to access file-specific metadata or features.
+///
+/// # Where is AsyncAnyPcapReader?
+///
+/// This library currently only provides sync pcapng reading functionality.
+/// Async pcapng reading functionality will be added in a future release.
+///
+/// # How is is the the file type determined?
+///
+/// The file type is determined by reading the first four bytes (magic number)
+/// of the file. If the magic number matches the pcap format, a pcap reader
+/// is created. If it matches the pcapng format, a pcapng reader is created.
+/// See [PcapFileType::from_magic] for more information.
+#[derive(Debug)]
 pub struct SyncAnyPcapReader<R: std::io::Read> {
     inner: SyncAnyPcapReaderInner<R>,
 }

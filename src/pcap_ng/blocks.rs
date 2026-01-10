@@ -13,6 +13,7 @@ mod interface;
 mod name_resolution;
 mod simple_packet;
 pub use enhanced_packet::EnhancedPacket;
+
 pub use generic::GenericBlock;
 pub use header::{SHBOptionCodes, SectionHeaderBlock};
 pub use interface::{InterfaceDescriptionBlock, InterfaceOptionCodes};
@@ -55,6 +56,40 @@ pub trait Block {
     ) -> Result<Self, PcapNgParseError>
     where
         Self: Sized;
+}
+#[cfg(feature = "tokio-async")]
+mod tokio_block {
+    #![allow(dead_code)]
+    use tokio::io::{AsyncRead, AsyncReadExt};
+
+    use crate::{
+        byte_order::{Endianness, UndertminedByteOrder},
+        pcap_ng::{PcapNgParseError, blocks::BlockHeader},
+    };
+
+    pub trait TokioAsyncBlock: super::Block {
+        /// Asynchronously reads the block from the reader with the given header and byte order
+        fn async_read_with_header<R: AsyncRead + Unpin>(
+            reader: &mut R,
+            header: &BlockHeader,
+            byte_order: Option<Endianness>,
+        ) -> impl Future<Output = Result<Self, PcapNgParseError>>
+        where
+            Self: Sized,
+        {
+            async move {
+                header.matches_block_id::<Self>()?;
+                let determined_byte_order = byte_order
+                    .or(header.endianness_from_block::<Self>())
+                    .ok_or(UndertminedByteOrder)?;
+                let block_length = header.block_length_as_u32(determined_byte_order) as usize - 8;
+                let mut content = vec![0u8; block_length];
+                reader.read_exact(&mut content).await?;
+                let mut cursor = std::io::Cursor::new(content);
+                Self::read_with_header(&mut cursor, header, byte_order)
+            }
+        }
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {

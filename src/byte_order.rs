@@ -201,6 +201,50 @@ impl<R: Write> WriteExt for R {
         Ok(())
     }
 }
+
+#[cfg(feature = "tokio-async")]
+pub mod tokio_async {
+    use tokio::io::{AsyncRead, AsyncReadExt as _};
+
+    use crate::byte_order::ByteOrder;
+
+    pub trait AsyncReadExt {
+        /// Reads a u16 from the reader
+        fn read_u16<B: ByteOrder>(
+            &mut self,
+            byte_order: B,
+        ) -> impl Future<Output = Result<u16, std::io::Error>>;
+
+        /// Reads a u32 from the reader
+        fn read_u32<B: ByteOrder>(
+            &mut self,
+            byte_order: B,
+        ) -> impl Future<Output = Result<u32, std::io::Error>>;
+        /// Has nothing to do with byte order, just reads a fixed number of bytes
+        ///
+        /// But exists for simplicity
+        fn read_bytes<const SIZE: usize>(
+            &mut self,
+        ) -> impl Future<Output = Result<[u8; SIZE], std::io::Error>>;
+    }
+    impl<R: AsyncRead + Unpin> AsyncReadExt for R {
+        async fn read_u16<B: ByteOrder>(&mut self, byte_order: B) -> Result<u16, std::io::Error> {
+            let mut buffer = [0u8; 2];
+            self.read_exact(&mut buffer).await?;
+            Ok(byte_order.u16_from_bytes(buffer))
+        }
+        async fn read_u32<B: ByteOrder>(&mut self, byte_order: B) -> Result<u32, std::io::Error> {
+            let mut buffer = [0u8; 4];
+            self.read_exact(&mut buffer).await?;
+            Ok(byte_order.u32_from_bytes(buffer))
+        }
+        async fn read_bytes<const SIZE: usize>(&mut self) -> Result<[u8; SIZE], std::io::Error> {
+            let mut buffer = [0u8; SIZE];
+            self.read_exact(&mut buffer).await?;
+            Ok(buffer)
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

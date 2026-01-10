@@ -94,6 +94,12 @@ impl Block for InterfaceDescriptionBlock {
         })
     }
 }
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use crate::pcap_ng::blocks::{InterfaceDescriptionBlock, tokio_block::TokioAsyncBlock};
+
+    impl TokioAsyncBlock for InterfaceDescriptionBlock {}
+}
 impl InterfaceDescriptionBlock {
     pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
         let header = BlockHeader::read(reader)?;

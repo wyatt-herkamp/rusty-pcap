@@ -89,7 +89,63 @@ impl SectionHeaderBlock {
         Self::read_with_header::<_>(reader, &header, None)
     }
 }
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use crate::{
+        Version,
+        byte_order::{ByteOrder, Endianness, tokio_async::AsyncReadExt},
+        pcap_ng::{
+            PcapNgParseError,
+            blocks::{BlockHeader, SectionHeaderBlock, tokio_block::TokioAsyncBlock},
+            options::BlockOptions,
+        },
+    };
 
+    impl TokioAsyncBlock for SectionHeaderBlock {
+        async fn async_read_with_header<R: tokio::io::AsyncRead + Unpin>(
+            reader: &mut R,
+            header: &BlockHeader,
+            _byte_order: Option<Endianness>,
+        ) -> Result<Self, PcapNgParseError>
+        where
+            Self: Sized,
+        {
+            header.matches_block_id::<Self>()?;
+            let header_data = reader.read_bytes::<16>().await?;
+
+            let byte_order = Endianness::from_pcap_ng_bytes(&[
+                header_data[0],
+                header_data[1],
+                header_data[2],
+                header_data[3],
+            ])?;
+            let block_length = header.block_length_as_u32(byte_order);
+            let version = Version::parse(&header_data[4..8], byte_order);
+            let section_length: [u8; 8] = header_data[8..16].try_into()?;
+            let section_length = if section_length == [0xFF; 8] {
+                None // No section length
+            } else {
+                Some(byte_order.u64_from_bytes(section_length))
+            };
+
+            let options_space = block_length as usize - 24;
+            let options = if options_space > 0 {
+                Some(BlockOptions::read_async(reader, byte_order).await?)
+            } else {
+                None
+            };
+            reader.read_bytes::<4>().await?;
+            let result = Self {
+                block_length,
+                byte_order,
+                version,
+                section_length,
+                options,
+            };
+            Ok(result)
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

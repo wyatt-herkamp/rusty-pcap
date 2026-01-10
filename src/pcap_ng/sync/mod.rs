@@ -72,7 +72,11 @@ impl<R: Read> SyncPcapNgReader<R> {
         }
         Ok(Some(result))
     }
-
+    /// Reads the next packet from the pcapng file
+    ///
+    /// If any other block types are encountered, they will be skipped until a packet block is found
+    ///
+    /// When Ok(None) is returned, it indicates the end of the file has been reached
     pub fn next_packet(&mut self) -> Result<Option<(AnyPacketHeader, Vec<u8>)>, PcapNgParseError> {
         while let Some(block) = self.next_block()? {
             match block {

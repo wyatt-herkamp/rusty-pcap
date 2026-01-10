@@ -51,6 +51,12 @@ impl Block for SimplePacket {
         })
     }
 }
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use crate::pcap_ng::blocks::{SimplePacket, tokio_block::TokioAsyncBlock};
+
+    impl TokioAsyncBlock for SimplePacket {}
+}
 impl SimplePacket {
     pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
         let header = BlockHeader::read(reader)?;

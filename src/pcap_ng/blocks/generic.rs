@@ -54,3 +54,40 @@ impl GenericBlock {
         Self::read_with_header(reader, &header, byte_order)
     }
 }
+
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use tokio::io::{AsyncRead, AsyncReadExt as _};
+
+    use crate::{
+        byte_order::{Endianness, tokio_async::AsyncReadExt as _},
+        pcap_ng::{
+            PcapNgParseError,
+            blocks::{BlockHeader, GenericBlock},
+        },
+    };
+
+    impl GenericBlock {
+        pub async fn read_async_with_header<R: AsyncRead + Unpin>(
+            reader: &mut R,
+            header: &BlockHeader,
+            byte_order: Endianness,
+        ) -> Result<Self, PcapNgParseError> {
+            let block_length = header.block_length_as_u32(byte_order);
+            let data = if block_length > 12 {
+                let mut data = vec![0u8; (block_length - 12) as usize];
+                reader.read_exact(&mut data).await?;
+                Some(data)
+            } else {
+                None
+            };
+
+            reader.read_bytes::<4>().await?;
+            Ok(Self {
+                block_id: header.block_id_as_u32(byte_order),
+                block_length,
+                data,
+            })
+        }
+    }
+}

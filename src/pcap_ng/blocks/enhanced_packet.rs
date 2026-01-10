@@ -90,3 +90,9 @@ impl EnhancedPacket {
         Self::read_with_header::<_>(reader, &header, Some(byte_order))
     }
 }
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use crate::pcap_ng::blocks::{EnhancedPacket, tokio_block::TokioAsyncBlock};
+
+    impl TokioAsyncBlock for EnhancedPacket {}
+}

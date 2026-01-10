@@ -240,7 +240,75 @@ impl BlockOptions {
         Ok(())
     }
 }
+#[cfg(feature = "tokio-async")]
+mod tokio_async {
+    use tokio::io::{AsyncRead, AsyncReadExt as _};
 
+    use crate::{
+        byte_order::{ByteOrder, tokio_async::AsyncReadExt as InternalAsyncReadExt},
+        pcap_ng::{
+            options::{BlockOption, BlockOptions, OptionParseError, StandardOptions},
+            pad_length_to_32_bytes,
+        },
+    };
+
+    impl BlockOptions {
+        async fn read_async_option_header<R: AsyncRead + Unpin, B: ByteOrder>(
+            reader: &mut R,
+            byte_order: B,
+        ) -> Result<Option<(u16, u16, Option<u32>)>, OptionParseError> {
+            let option_code = <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
+            let option_length = <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
+
+            if option_code == 0 && option_length == 0 {
+                return Ok(None); // No more options to read
+            }
+
+            let pen = match StandardOptions::try_from(option_code) {
+                Ok(option) if option.is_custom() => {
+                    Some(<R as InternalAsyncReadExt>::read_u32(reader, byte_order).await?)
+                }
+                _ => None, // Skip unknown options
+            };
+            Ok(Some((option_code, option_length, pen)))
+        }
+
+        pub async fn read_async_in<R: AsyncRead + Unpin, B: ByteOrder>(
+            &mut self,
+            reader: &mut R,
+            byte_order: B,
+        ) -> Result<(), OptionParseError> {
+            loop {
+                let Some((option_code, option_length, pen)) =
+                    Self::read_async_option_header(reader, byte_order).await?
+                else {
+                    break; // No more options to read
+                };
+
+                let padded_length = pad_length_to_32_bytes(option_length as usize);
+                let mut option_value = vec![0u8; padded_length];
+                reader.read_exact(&mut option_value).await?;
+                option_value.truncate(option_length as usize);
+
+                self.0.push(BlockOption {
+                    code: option_code,
+                    length: option_length,
+                    pen,
+                    value: option_value,
+                });
+            }
+            Ok(())
+        }
+        pub async fn read_async<R: AsyncRead + Unpin, B: ByteOrder>(
+            reader: &mut R,
+            byte_order: B,
+        ) -> Result<Self, OptionParseError> {
+            let mut options = Self::default();
+            options.read_async_in(reader, byte_order).await?;
+            Ok(options)
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
