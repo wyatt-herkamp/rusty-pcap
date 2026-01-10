@@ -1,8 +1,11 @@
 use std::io::Read;
 
-use crate::pcap_ng::{
-    PcapNgParseError,
-    blocks::{BlockHeader, InterfaceDescriptionBlock, PcapNgBlock, SectionHeaderBlock},
+use crate::{
+    any_reader::AnyPacketHeader,
+    pcap_ng::{
+        PcapNgParseError,
+        blocks::{BlockHeader, InterfaceDescriptionBlock, PcapNgBlock, SectionHeaderBlock},
+    },
 };
 
 /// A synchronous reader for PCAP-NG files
@@ -29,6 +32,13 @@ impl<R: Read> SyncPcapNgReader<R> {
             current_section,
             interfaces: Vec::with_capacity(1),
         })
+    }
+    pub(crate) fn new_with_section(reader: R, current_section: SectionHeaderBlock) -> Self {
+        Self {
+            reader,
+            current_section,
+            interfaces: Vec::with_capacity(1),
+        }
     }
     /// Returns the file header of the pcap file
     pub fn current_section(&self) -> &SectionHeaderBlock {
@@ -61,6 +71,41 @@ impl<R: Read> SyncPcapNgReader<R> {
             _ => {}
         }
         Ok(Some(result))
+    }
+
+    pub fn next_packet(&mut self) -> Result<Option<(AnyPacketHeader, Vec<u8>)>, PcapNgParseError> {
+        while let Some(block) = self.next_block()? {
+            match block {
+                PcapNgBlock::EnhancedPacket(enhanced_packet) => {
+                    return Ok(Some((
+                        AnyPacketHeader::PcapNgEnhanced {
+                            block_length: enhanced_packet.block_length,
+                            original_length: enhanced_packet.original_length,
+                            interface_id: enhanced_packet.interface_id,
+                            timestamp_high: enhanced_packet.timestamp_high,
+                            timestamp_low: enhanced_packet.timestamp_low,
+                            captured_length: enhanced_packet.captured_length,
+                            options: enhanced_packet.options,
+                        },
+                        enhanced_packet.content,
+                    )));
+                }
+                PcapNgBlock::SimplePacket(simple_packet) => {
+                    return Ok(Some((
+                        AnyPacketHeader::PcapNgSimple {
+                            block_length: simple_packet.block_length,
+                            original_length: simple_packet.original_length,
+                        },
+                        simple_packet.content,
+                    )));
+                }
+                _ => {
+                    // Continue to the next block
+                    continue;
+                }
+            }
+        }
+        Ok(None)
     }
 }
 #[cfg(test)]

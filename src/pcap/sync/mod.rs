@@ -30,6 +30,15 @@ impl<R: Read> SyncPcapReader<R> {
             header_buffer: [0; 16],
         })
     }
+    pub(crate) fn new_with_header(reader: R, file_header: PcapFileHeader) -> Self {
+        let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
+        Self {
+            reader,
+            buffer,
+            file_header,
+            header_buffer: [0; 16],
+        }
+    }
     /// Returns the file header of the pcap file
     pub fn file_header(&self) -> &PcapFileHeader {
         &self.file_header

@@ -9,12 +9,12 @@ use crate::{
     pcap::file_header::MagicNumberAndEndianness,
     pcap_ng::PCAP_NG_MAGIC,
 };
-
+pub mod any_reader;
 pub mod byte_order;
 pub mod link_type;
 pub mod pcap;
 pub mod pcap_ng;
-
+pub(crate) mod utils;
 /// PcapFileType is the type of the pcap file, either Pcap or PcapNg
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PcapFileType {
