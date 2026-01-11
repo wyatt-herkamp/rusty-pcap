@@ -4,10 +4,13 @@
 //! - [Wireshark Wiki - File Format](https://wiki.wireshark.org/Development/LibpcapFileFormat)
 pub mod file_header;
 pub mod packet_header;
-pub mod sync;
+mod sync;
+pub use sync::*;
 #[cfg(feature = "tokio-async")]
-pub mod tokio_impl;
+mod tokio_impl;
 use thiserror::Error;
+#[cfg(feature = "tokio-async")]
+pub use tokio_impl::AsyncPcapReader;
 
 use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 

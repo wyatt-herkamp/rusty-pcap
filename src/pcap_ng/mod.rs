@@ -8,9 +8,12 @@ use thiserror::Error;
 use crate::{byte_order::Endianness, link_type::InvalidLinkType};
 pub mod blocks;
 pub mod options;
-pub mod sync;
+mod sync;
+pub use sync::*;
 #[cfg(feature = "tokio-async")]
-pub mod tokio_impl;
+mod tokio_impl;
+#[cfg(feature = "tokio-async")]
+pub use tokio_impl::*;
 /// Magic number for pcap-ng files
 ///
 /// All pcap-ng files should start with this magic number

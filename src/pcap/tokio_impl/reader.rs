@@ -1,6 +1,7 @@
 //! Asynchronous reader for PCAP files
 use crate::{
-    pcap::PcapParseError, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
+    Version,
+    pcap::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHeader},
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 #[derive(Debug)]
@@ -42,6 +43,10 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
     /// Returns the file header of the pcap file
     pub fn file_header(&self) -> &PcapFileHeader {
         &self.file_header
+    }
+    /// Returns the version of the pcap file
+    pub fn version(&self) -> &Version {
+        &self.file_header.version
     }
     /// Reads the next packet from the pcap file
     /// Returns `Ok(None)` if there are no more packets to read

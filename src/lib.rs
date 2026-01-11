@@ -2,7 +2,7 @@
 //! rusty-pcap is a pcap library for Rust
 //!
 //! 100% Rust implementation of a pcap reader
-use std::{cmp, io::Write};
+use std::{cmp, fmt::Display, io::Write};
 
 use crate::{
     byte_order::{ByteOrder, WriteExt},
@@ -24,6 +24,14 @@ pub enum PcapFileType {
     Pcap,
     /// PcapNg file format
     PcapNg,
+}
+impl Display for PcapFileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PcapFileType::Pcap => write!(f, "PCAP"),
+            PcapFileType::PcapNg => write!(f, "PCAP-NG"),
+        }
+    }
 }
 impl PcapFileType {
     /// Returns the PcapFileType from the magic number

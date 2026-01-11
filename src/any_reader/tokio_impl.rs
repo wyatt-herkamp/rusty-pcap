@@ -3,13 +3,13 @@ use std::borrow::Cow;
 use tokio::io::AsyncRead;
 
 use crate::{
-    PcapFileType,
+    PcapFileType, Version,
     any_reader::{AnyPacketHeader, AnyPcapPacket, AnyPcapReaderError},
     byte_order::tokio_async::AsyncReadExt,
-    pcap::{file_header::PcapFileHeader, tokio_impl::AsyncPcapReader},
+    pcap::{AsyncPcapReader, file_header::PcapFileHeader},
     pcap_ng::{
+        AsyncPcapNgReader,
         blocks::{BlockHeader, SectionHeaderBlock, TokioAsyncBlock},
-        tokio_impl::AsyncPcapNgReader,
     },
     utils::tokio_impl::AsyncPeakableReader,
 };
@@ -95,7 +95,7 @@ impl<R: AsyncRead + Unpin> AsyncAnyPcapReader<R> {
     ///
     /// # Why Cow?
     ///
-    /// The PcapNg packets do not have a fixed size buffer and each packet is read into a newly allocated Vec<u8>
+    /// The PcapNg packets do not have a fixed size buffer and each packet is read into a newly allocated `Vec<u8>`
     pub async fn next_packet(&mut self) -> Result<Option<AnyPcapPacket<'_>>, AnyPcapReaderError> {
         match &mut self.inner {
             AsyncAnyPcapReaderInner::Pcap(pcap_reader) => match pcap_reader.next_packet().await? {
@@ -117,6 +117,15 @@ impl<R: AsyncRead + Unpin> AsyncAnyPcapReader<R> {
         match &self.inner {
             AsyncAnyPcapReaderInner::Pcap(_) => PcapFileType::Pcap,
             AsyncAnyPcapReaderInner::PcapNg(_) => PcapFileType::PcapNg,
+        }
+    }
+    /// Returns the version of the pcap or pcapng file
+    ///
+    /// See [AsyncPcapReader::version] and [AsyncPcapNgReader::version] for more information
+    pub fn version(&self) -> &Version {
+        match &self.inner {
+            AsyncAnyPcapReaderInner::Pcap(pcap_reader) => pcap_reader.version(),
+            AsyncAnyPcapReaderInner::PcapNg(pcapng_reader) => pcapng_reader.version(),
         }
     }
 }

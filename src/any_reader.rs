@@ -1,11 +1,12 @@
+//! Reading either pcap or pcapng files
 use std::{borrow::Cow, io::Read};
 
 use thiserror::Error;
 
 use crate::{
-    PcapFileType,
-    pcap::{PcapParseError, file_header::PcapFileHeader, sync::SyncPcapReader},
-    pcap_ng::{PcapNgParseError, blocks::SectionHeaderBlock, sync::SyncPcapNgReader},
+    PcapFileType, Version,
+    pcap::{PcapParseError, SyncPcapReader, file_header::PcapFileHeader},
+    pcap_ng::{PcapNgParseError, SyncPcapNgReader, blocks::SectionHeaderBlock},
     utils::PeakableReader,
 };
 mod header;
@@ -102,7 +103,7 @@ impl<R: Read> SyncAnyPcapReader<R> {
     ///
     /// # Why Cow?
     ///
-    /// The PcapNg packets do not have a fixed size buffer and each packet is read into a newly allocated Vec<u8>
+    /// The PcapNg packets do not have a fixed size buffer and each packet is read into a newly allocated `Vec<u8>`
     pub fn next_packet(&mut self) -> Result<Option<AnyPcapPacket<'_>>, AnyPcapReaderError> {
         match &mut self.inner {
             SyncAnyPcapReaderInner::Pcap(pcap_reader) => match pcap_reader.next_packet()? {
@@ -122,6 +123,15 @@ impl<R: Read> SyncAnyPcapReader<R> {
         match &self.inner {
             SyncAnyPcapReaderInner::Pcap(_) => PcapFileType::Pcap,
             SyncAnyPcapReaderInner::PcapNg(_) => PcapFileType::PcapNg,
+        }
+    }
+    /// Returns the version of the pcap or pcapng file
+    ///
+    /// See [SyncPcapReader::version] and [SyncPcapNgReader::version] for more information
+    pub fn version(&self) -> &Version {
+        match &self.inner {
+            SyncAnyPcapReaderInner::Pcap(pcap_reader) => pcap_reader.version(),
+            SyncAnyPcapReaderInner::PcapNg(pcapng_reader) => pcapng_reader.version(),
         }
     }
 }

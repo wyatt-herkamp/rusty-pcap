@@ -39,7 +39,12 @@ impl<R: Read> Read for PeakableReader<R> {
 
 #[cfg(feature = "tokio-async")]
 pub mod tokio_impl {
-    use tokio::io::{AsyncRead, AsyncReadExt as _};
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+
+    use tokio::io::{AsyncRead, AsyncReadExt as _, ReadBuf};
 
     /// A reader that allows peaking into the first N bytes without consuming them
     pub struct AsyncPeakableReader<R: AsyncRead + Unpin> {
@@ -64,10 +69,10 @@ pub mod tokio_impl {
     }
     impl<R: AsyncRead + Unpin> AsyncRead for AsyncPeakableReader<R> {
         fn poll_read(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: &mut tokio::io::ReadBuf<'_>,
-        ) -> std::task::Poll<std::io::Result<()>> {
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<std::io::Result<()>> {
             if let Some(peeked) = &mut self.peeked {
                 let to_read = std::cmp::min(buf.remaining(), peeked.len());
                 buf.put_slice(&peeked[..to_read]);
@@ -76,9 +81,9 @@ pub mod tokio_impl {
                 } else {
                     *peeked = peeked[to_read..].to_vec();
                 }
-                std::task::Poll::Ready(Ok(()))
+                Poll::Ready(Ok(()))
             } else {
-                std::pin::Pin::new(&mut self.inner).poll_read(cx, buf)
+                Pin::new(&mut self.inner).poll_read(cx, buf)
             }
         }
     }

@@ -1,5 +1,6 @@
 //! Asynchronous reader for PCAP files
 use crate::{
+    Version,
     any_reader::AnyPacketHeader,
     byte_order::tokio_async::AsyncReadExt as _,
     pcap_ng::{
@@ -58,6 +59,13 @@ impl<R: AsyncRead + Unpin> AsyncPcapNgReader<R> {
     pub fn current_section(&self) -> &SectionHeaderBlock {
         &self.current_section
     }
+    /// Returns the version of the pcap-ng file
+    ///
+    /// This is obtained from the current section header block which isn't explicitly stated will never change throughout the file
+    pub fn version(&self) -> &Version {
+        &self.current_section.version
+    }
+
     /// Returns the interfaces described in the file
     pub fn interfaces(&self) -> &[InterfaceDescriptionBlock] {
         &self.interfaces

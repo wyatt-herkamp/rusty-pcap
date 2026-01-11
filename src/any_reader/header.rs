@@ -1,5 +1,10 @@
 use crate::{pcap::packet_header::PacketHeader, pcap_ng::options::BlockOptions};
 
+/// A unified packet header enum that can represent both pcap and pcapng packet headers
+///
+/// This enum encapsulates the different packet header formats found in pcap and pcapng files,
+/// allowing for a consistent interface when working with packet headers regardless of the file type.
+///
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyPacketHeader {
     Pcap(PacketHeader),

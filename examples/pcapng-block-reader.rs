@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use rusty_pcap::pcap_ng::{
+    SyncPcapNgReader,
     blocks::{PcapNgBlock, SectionHeaderBlock},
-    sync::SyncPcapNgReader,
 };
 #[derive(Parser, Debug)]
 #[clap(name = "pcapng-block-reader")]

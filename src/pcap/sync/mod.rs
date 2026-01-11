@@ -2,8 +2,10 @@
 use std::io::Read;
 pub mod writer;
 use crate::{
-    pcap::PcapParseError, pcap::file_header::PcapFileHeader, pcap::packet_header::PacketHeader,
+    Version,
+    pcap::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHeader},
 };
+/// A synchronous reader for PCAP files
 #[derive(Debug)]
 pub struct SyncPcapReader<R: Read> {
     reader: R,
@@ -42,6 +44,10 @@ impl<R: Read> SyncPcapReader<R> {
     /// Returns the file header of the pcap file
     pub fn file_header(&self) -> &PcapFileHeader {
         &self.file_header
+    }
+    /// Returns the version of the pcap file
+    pub fn version(&self) -> &Version {
+        &self.file_header.version
     }
     pub fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapParseError> {
         if let Err(err) = self.reader.read_exact(&mut self.header_buffer) {
