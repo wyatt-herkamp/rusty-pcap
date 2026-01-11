@@ -1,39 +1,27 @@
-use std::{borrow::Cow, io::Read};
+use std::borrow::Cow;
 
-use thiserror::Error;
+use tokio::io::AsyncRead;
 
 use crate::{
     PcapFileType,
-    pcap::{PcapParseError, file_header::PcapFileHeader, sync::SyncPcapReader},
-    pcap_ng::{PcapNgParseError, blocks::SectionHeaderBlock, sync::SyncPcapNgReader},
-    utils::PeakableReader,
+    any_reader::{AnyPacketHeader, AnyPcapPacket, AnyPcapReaderError},
+    byte_order::tokio_async::AsyncReadExt,
+    pcap::{file_header::PcapFileHeader, tokio_impl::AsyncPcapReader},
+    pcap_ng::{
+        blocks::{BlockHeader, SectionHeaderBlock, TokioAsyncBlock},
+        tokio_impl::AsyncPcapNgReader,
+    },
+    utils::tokio_impl::AsyncPeakableReader,
 };
-mod header;
-pub use header::*;
-#[cfg(feature = "tokio-async")]
-mod tokio_impl;
-#[cfg(feature = "tokio-async")]
-pub use tokio_impl::AsyncAnyPcapReader;
 
-#[derive(Debug, Error)]
-pub enum AnyPcapReaderError {
-    #[error("Invalid pcap format")]
-    InvalidPcapFormat,
-    #[error(transparent)]
-    PcapError(#[from] PcapParseError),
-    #[error(transparent)]
-    PcapNgError(#[from] PcapNgParseError),
-    #[error(transparent)]
-    IOError(#[from] std::io::Error),
-}
 #[derive(Debug)]
-enum SyncAnyPcapReaderInner<R: std::io::Read> {
-    Pcap(SyncPcapReader<R>),
-    PcapNg(SyncPcapNgReader<R>),
+enum AsyncAnyPcapReaderInner<R: AsyncRead + Unpin> {
+    Pcap(AsyncPcapReader<R>),
+    PcapNg(AsyncPcapNgReader<R>),
 }
-impl<R: Read> SyncAnyPcapReaderInner<R> {
-    pub fn new(mut reader: R) -> Result<Self, AnyPcapReaderError> {
-        let mut peakable = PeakableReader::new(&mut reader, 4)?;
+impl<R: AsyncRead + Unpin> AsyncAnyPcapReaderInner<R> {
+    pub async fn new(mut reader: R) -> Result<Self, AnyPcapReaderError> {
+        let mut peakable = AsyncPeakableReader::new(&mut reader, 4).await?;
         let peak = peakable.peak().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
@@ -58,23 +46,28 @@ impl<R: Read> SyncAnyPcapReaderInner<R> {
         };
         match file_type {
             PcapFileType::Pcap => {
-                let header = PcapFileHeader::read(&mut peakable)?;
+                let first_24_bytes = peakable.read_bytes::<24>().await?;
+                let header = PcapFileHeader::try_from(&first_24_bytes)?;
                 drop(peakable);
-                Ok(SyncAnyPcapReaderInner::Pcap(
-                    SyncPcapReader::new_with_header(reader, header),
+                Ok(AsyncAnyPcapReaderInner::Pcap(
+                    AsyncPcapReader::new_with_header(reader, header),
                 ))
             }
             PcapFileType::PcapNg => {
-                let current_section = SectionHeaderBlock::read_from_reader(&mut peakable)?;
+                let header_bytes = peakable.read_bytes::<8>().await?;
+                let header = BlockHeader::parse_from_bytes(&header_bytes)?;
+
+                let current_section =
+                    SectionHeaderBlock::async_read_with_header(&mut peakable, &header, None)
+                        .await?;
                 drop(peakable);
-                Ok(SyncAnyPcapReaderInner::PcapNg(
-                    SyncPcapNgReader::new_with_section(reader, current_section),
+                Ok(AsyncAnyPcapReaderInner::PcapNg(
+                    AsyncPcapNgReader::new_with_section(reader, current_section),
                 ))
             }
         }
     }
 }
-pub type AnyPcapPacket<'a> = (AnyPacketHeader, Cow<'a, [u8]>);
 /// A reader that can read both pcap and pcapng files
 ///
 /// # When Should I use this?
@@ -89,13 +82,13 @@ pub type AnyPcapPacket<'a> = (AnyPacketHeader, Cow<'a, [u8]>);
 /// is created. If it matches the pcapng format, a pcapng reader is created.
 /// See [PcapFileType::from_magic] for more information.
 #[derive(Debug)]
-pub struct SyncAnyPcapReader<R: std::io::Read> {
-    inner: SyncAnyPcapReaderInner<R>,
+pub struct AsyncAnyPcapReader<R: AsyncRead + Unpin> {
+    inner: AsyncAnyPcapReaderInner<R>,
 }
-impl<R: Read> SyncAnyPcapReader<R> {
+impl<R: AsyncRead + Unpin> AsyncAnyPcapReader<R> {
     /// Creates a new `SyncAnyPcapReader` from a reader
-    pub fn new(reader: R) -> Result<Self, AnyPcapReaderError> {
-        let inner = SyncAnyPcapReaderInner::new(reader)?;
+    pub async fn new(reader: R) -> Result<Self, AnyPcapReaderError> {
+        let inner = AsyncAnyPcapReaderInner::new(reader).await?;
         Ok(Self { inner })
     }
     /// Reads the next packet from the pcap or pcapng file
@@ -103,25 +96,27 @@ impl<R: Read> SyncAnyPcapReader<R> {
     /// # Why Cow?
     ///
     /// The PcapNg packets do not have a fixed size buffer and each packet is read into a newly allocated Vec<u8>
-    pub fn next_packet(&mut self) -> Result<Option<AnyPcapPacket<'_>>, AnyPcapReaderError> {
+    pub async fn next_packet(&mut self) -> Result<Option<AnyPcapPacket<'_>>, AnyPcapReaderError> {
         match &mut self.inner {
-            SyncAnyPcapReaderInner::Pcap(pcap_reader) => match pcap_reader.next_packet()? {
+            AsyncAnyPcapReaderInner::Pcap(pcap_reader) => match pcap_reader.next_packet().await? {
                 Some((header, data)) => {
                     Ok(Some((AnyPacketHeader::Pcap(header), Cow::Borrowed(data))))
                 }
                 None => Ok(None),
             },
-            SyncAnyPcapReaderInner::PcapNg(pcapng_reader) => match pcapng_reader.next_packet()? {
-                Some((header, data)) => Ok(Some((header, Cow::Owned(data)))),
-                None => Ok(None),
-            },
+            AsyncAnyPcapReaderInner::PcapNg(pcapng_reader) => {
+                match pcapng_reader.next_packet().await? {
+                    Some((header, data)) => Ok(Some((header, Cow::Owned(data)))),
+                    None => Ok(None),
+                }
+            }
         }
     }
     /// Returns the type of the pcap file
     pub fn file_type(&self) -> PcapFileType {
         match &self.inner {
-            SyncAnyPcapReaderInner::Pcap(_) => PcapFileType::Pcap,
-            SyncAnyPcapReaderInner::PcapNg(_) => PcapFileType::PcapNg,
+            AsyncAnyPcapReaderInner::Pcap(_) => PcapFileType::Pcap,
+            AsyncAnyPcapReaderInner::PcapNg(_) => PcapFileType::PcapNg,
         }
     }
 }
@@ -130,14 +125,18 @@ mod tests {
 
     use etherparse::{NetSlice, SlicedPacket};
 
-    use crate::{PcapFileType, any_reader::SyncAnyPcapReader};
+    use crate::{PcapFileType, any_reader::AsyncAnyPcapReader};
 
-    #[test]
-    fn test_read_any_pcap() {
-        let file = std::fs::File::open("test_data/test.pcap").expect("Failed to open test.pcap");
-        let mut reader = SyncAnyPcapReader::new(file).expect("Failed to create SyncPcapReader");
+    #[tokio::test]
+    async fn test_read_any_pcap() {
+        let file = tokio::fs::File::open("test_data/test.pcap")
+            .await
+            .expect("Failed to open test.pcap");
+        let mut reader = AsyncAnyPcapReader::new(file)
+            .await
+            .expect("Failed to create AsyncAnyPcapReader");
         assert_eq!(reader.file_type(), PcapFileType::Pcap);
-        while let Ok(Some((header, data))) = reader.next_packet() {
+        while let Ok(Some((header, data))) = reader.next_packet().await {
             println!("Packet Header: {:?}", header);
             let parse = SlicedPacket::from_ethernet(data.as_ref()).expect("Failed to parse packet");
             let Some(net_slice) = parse.net else {
@@ -159,13 +158,16 @@ mod tests {
             }
         }
     }
-    #[test]
-    fn test_read_any_pcapng() {
-        let file = std::fs::File::open("test_data/ng/test001_be.pcapng")
+    #[tokio::test]
+    async fn test_read_any_pcapng() {
+        let file = tokio::fs::File::open("test_data/ng/test001_be.pcapng")
+            .await
             .expect("Failed to open test001_be.pcapng");
-        let mut reader = SyncAnyPcapReader::new(file).expect("Failed to create SyncPcapReader");
+        let mut reader = AsyncAnyPcapReader::new(file)
+            .await
+            .expect("Failed to create AsyncAnyPcapReader");
         assert_eq!(reader.file_type(), PcapFileType::PcapNg);
-        while let Ok(Some((header, data))) = reader.next_packet() {
+        while let Ok(Some((header, data))) = reader.next_packet().await {
             println!("Packet Header: {:?}", header);
             let parse = SlicedPacket::from_ethernet(data.as_ref()).expect("Failed to parse packet");
             let Some(net_slice) = parse.net else {

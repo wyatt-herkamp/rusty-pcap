@@ -64,11 +64,22 @@ mod tokio_block {
 
     use crate::{
         byte_order::{Endianness, UndertminedByteOrder},
-        pcap_ng::{PcapNgParseError, blocks::BlockHeader},
+        pcap_ng::{
+            PcapNgParseError,
+            blocks::{
+                Block, BlockHeader, EnhancedPacket, GenericBlock, InterfaceDescriptionBlock,
+                NameResolutionBlock, PcapNgBlock, SectionHeaderBlock, SimplePacket,
+            },
+        },
     };
 
-    pub trait TokioAsyncBlock: super::Block {
+    pub trait TokioAsyncBlock: Block {
         /// Asynchronously reads the block from the reader with the given header and byte order
+        ///
+        /// # Default Implementation
+        ///
+        /// By default, this implementation reads the entire block content into memory
+        /// and then calls the synchronous [Block::read_with_header] method.
         fn async_read_with_header<R: AsyncRead + Unpin>(
             reader: &mut R,
             header: &BlockHeader,
@@ -90,7 +101,46 @@ mod tokio_block {
             }
         }
     }
+    impl PcapNgBlock {
+        pub async fn read_async<R: AsyncRead + Unpin>(
+            reader: &mut R,
+            header: &BlockHeader,
+            byte_order: Endianness,
+        ) -> Result<Self, PcapNgParseError> {
+            let block_id = header.block_id_as_u32(byte_order);
+            match block_id {
+                168627466 => Ok(PcapNgBlock::SectionHeader(
+                    SectionHeaderBlock::async_read_with_header(reader, header, Some(byte_order))
+                        .await?,
+                )),
+                1 => Ok(PcapNgBlock::InterfaceDescription(
+                    InterfaceDescriptionBlock::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                    )
+                    .await?,
+                )),
+                3 => Ok(PcapNgBlock::SimplePacket(
+                    SimplePacket::async_read_with_header(reader, header, Some(byte_order)).await?,
+                )),
+                4 => Ok(PcapNgBlock::NameResolution(
+                    NameResolutionBlock::async_read_with_header(reader, header, Some(byte_order))
+                        .await?,
+                )),
+                6 => Ok(PcapNgBlock::EnhancedPacket(
+                    EnhancedPacket::async_read_with_header(reader, header, Some(byte_order))
+                        .await?,
+                )),
+                _ => Ok(PcapNgBlock::Generic(
+                    GenericBlock::read_async_with_header(reader, header, byte_order).await?,
+                )),
+            }
+        }
+    }
 }
+#[cfg(feature = "tokio-async")]
+pub use tokio_block::TokioAsyncBlock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {
     pub block_id: [u8; 4],
