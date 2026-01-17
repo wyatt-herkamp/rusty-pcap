@@ -35,6 +35,11 @@ expect_used = "deny"
 [[bench]]
 name = "parse"
 harness = false
-
+[[bench]]
+name = "parse_ng"
+harness = false
+[[bench]]
+name = "parse_ng_blocks"
+harness = false
 [package.metadata.docs.rs]
 features = ["tokio-async", "chrono"]

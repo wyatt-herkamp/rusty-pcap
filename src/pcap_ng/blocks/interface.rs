@@ -42,7 +42,7 @@ pub struct InterfaceDescriptionBlock {
     pub snap_length: u32,
     pub options: Option<BlockOptions>,
 }
-impl Block for InterfaceDescriptionBlock {
+impl<'b> Block<'b> for InterfaceDescriptionBlock {
     fn block_id() -> u32 {
         1
     }
@@ -61,6 +61,7 @@ impl Block for InterfaceDescriptionBlock {
         reader: &mut R,
         header: &BlockHeader,
         byte_order: Option<Endianness>,
+        _: &'b mut Vec<u8>,
     ) -> Result<Self, PcapNgParseError>
     where
         Self: Sized,
@@ -98,21 +99,23 @@ impl Block for InterfaceDescriptionBlock {
 mod tokio_async {
     use crate::pcap_ng::blocks::{InterfaceDescriptionBlock, tokio_block::TokioAsyncBlock};
 
-    impl TokioAsyncBlock for InterfaceDescriptionBlock {}
+    impl<'b> TokioAsyncBlock<'b> for InterfaceDescriptionBlock {}
 }
-impl InterfaceDescriptionBlock {
-    pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
-        let header = BlockHeader::read(reader)?;
-        Self::read_with_header::<_>(reader, &header, Some(byte_order))
-    }
-}
+//impl<'b> InterfaceDescriptionBlock<'b> {
+//    pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
+//        let header = BlockHeader::read(reader)?;
+//        Self::read_with_header(reader, &header, Some(byte_order))
+//    }
+//}
 
 #[cfg(test)]
 mod tests {
 
     use crate::{
         byte_order::Endianness,
-        pcap_ng::blocks::{InterfaceOptionCodes, interface::InterfaceDescriptionBlock},
+        pcap_ng::blocks::{
+            Block, BlockHeader, InterfaceOptionCodes, interface::InterfaceDescriptionBlock,
+        },
     };
     #[test]
     fn parse_bytes() -> anyhow::Result<()> {
@@ -122,7 +125,13 @@ mod tests {
             101, 0, 0, 0, 0, 52, 0, 0, 0,
         ];
         let mut reader = std::io::Cursor::new(&content);
-        let interface = InterfaceDescriptionBlock::read(&mut reader, Endianness::LittleEndian)?;
+        let header = BlockHeader::read(&mut reader)?;
+        let interface = InterfaceDescriptionBlock::read_with_header(
+            &mut reader,
+            &header,
+            Some(Endianness::LittleEndian),
+            &mut Vec::new(),
+        )?;
 
         assert_eq!(interface.block_length, 52);
         assert_eq!(interface.link_type, crate::link_type::LinkType::Ethernet);

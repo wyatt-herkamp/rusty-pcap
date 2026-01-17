@@ -1,5 +1,5 @@
 //! Reading either pcap or pcapng files
-use std::{borrow::Cow, io::Read};
+use std::io::Read;
 
 use thiserror::Error;
 
@@ -66,7 +66,8 @@ impl<R: Read> SyncAnyPcapReaderInner<R> {
                 ))
             }
             PcapFileType::PcapNg => {
-                let current_section = SectionHeaderBlock::read_from_reader(&mut peakable)?;
+                let current_section =
+                    SectionHeaderBlock::read_from_reader(&mut peakable, &mut Vec::new())?;
                 drop(peakable);
                 Ok(SyncAnyPcapReaderInner::PcapNg(
                     SyncPcapNgReader::new_with_section(reader, current_section),
@@ -75,7 +76,7 @@ impl<R: Read> SyncAnyPcapReaderInner<R> {
         }
     }
 }
-pub type AnyPcapPacket<'a> = (AnyPacketHeader, Cow<'a, [u8]>);
+pub type AnyPcapPacket<'a> = (AnyPacketHeader, &'a [u8]);
 /// A reader that can read both pcap and pcapng files
 ///
 /// # When Should I use this?
@@ -107,13 +108,11 @@ impl<R: Read> SyncAnyPcapReader<R> {
     pub fn next_packet(&mut self) -> Result<Option<AnyPcapPacket<'_>>, AnyPcapReaderError> {
         match &mut self.inner {
             SyncAnyPcapReaderInner::Pcap(pcap_reader) => match pcap_reader.next_packet()? {
-                Some((header, data)) => {
-                    Ok(Some((AnyPacketHeader::Pcap(header), Cow::Borrowed(data))))
-                }
+                Some((header, data)) => Ok(Some((AnyPacketHeader::Pcap(header), data))),
                 None => Ok(None),
             },
             SyncAnyPcapReaderInner::PcapNg(pcapng_reader) => match pcapng_reader.next_packet()? {
-                Some((header, data)) => Ok(Some((header, Cow::Owned(data)))),
+                Some((header, data)) => Ok(Some((header, data))),
                 None => Ok(None),
             },
         }
@@ -149,7 +148,7 @@ mod tests {
         assert_eq!(reader.file_type(), PcapFileType::Pcap);
         while let Ok(Some((header, data))) = reader.next_packet() {
             println!("Packet Header: {:?}", header);
-            let parse = SlicedPacket::from_ethernet(data.as_ref()).expect("Failed to parse packet");
+            let parse = SlicedPacket::from_ethernet(data).expect("Failed to parse packet");
             let Some(net_slice) = parse.net else {
                 panic!("Expected a network layer slice, got: {:?}", parse);
             };
@@ -177,7 +176,7 @@ mod tests {
         assert_eq!(reader.file_type(), PcapFileType::PcapNg);
         while let Ok(Some((header, data))) = reader.next_packet() {
             println!("Packet Header: {:?}", header);
-            let parse = SlicedPacket::from_ethernet(data.as_ref()).expect("Failed to parse packet");
+            let parse = SlicedPacket::from_ethernet(data).expect("Failed to parse packet");
             let Some(net_slice) = parse.net else {
                 panic!("Expected a network layer slice, got: {:?}", parse);
             };

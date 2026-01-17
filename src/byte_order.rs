@@ -20,18 +20,23 @@ pub trait ByteOrder: Clone + Copy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BigEndian;
 impl ByteOrder for BigEndian {
+    #[inline(always)]
     fn u16_from_bytes(self, bytes: [u8; 2]) -> u16 {
         u16::from_be_bytes(bytes)
     }
+    #[inline(always)]
     fn u16_to_bytes(self, value: u16) -> [u8; 2] {
         value.to_be_bytes()
     }
+    #[inline(always)]
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32 {
         u32::from_be_bytes(bytes)
     }
+    #[inline(always)]
     fn u32_to_bytes(self, value: u32) -> [u8; 4] {
         value.to_be_bytes()
     }
+    #[inline(always)]
     fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
         u64::from_be_bytes(bytes)
     }
@@ -39,18 +44,23 @@ impl ByteOrder for BigEndian {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LittleEndian;
 impl ByteOrder for LittleEndian {
+    #[inline(always)]
     fn u16_from_bytes(self, bytes: [u8; 2]) -> u16 {
         u16::from_le_bytes(bytes)
     }
+    #[inline(always)]
     fn u16_to_bytes(self, value: u16) -> [u8; 2] {
         value.to_le_bytes()
     }
+    #[inline(always)]
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32 {
         u32::from_le_bytes(bytes)
     }
+    #[inline(always)]
     fn u32_to_bytes(self, value: u32) -> [u8; 4] {
         value.to_le_bytes()
     }
+    #[inline(always)]
     fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
         u64::from_le_bytes(bytes)
     }
@@ -84,30 +94,35 @@ impl Default for Endianness {
     }
 }
 impl ByteOrder for Endianness {
+    #[inline(always)]
     fn u16_from_bytes(self, bytes: [u8; 2]) -> u16 {
         match self {
             Endianness::BigEndian => BigEndian.u16_from_bytes(bytes),
             Endianness::LittleEndian => LittleEndian.u16_from_bytes(bytes),
         }
     }
+    #[inline(always)]
     fn u16_to_bytes(self, value: u16) -> [u8; 2] {
         match self {
             Endianness::BigEndian => BigEndian.u16_to_bytes(value),
             Endianness::LittleEndian => LittleEndian.u16_to_bytes(value),
         }
     }
+    #[inline(always)]
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32 {
         match self {
             Endianness::BigEndian => BigEndian.u32_from_bytes(bytes),
             Endianness::LittleEndian => LittleEndian.u32_from_bytes(bytes),
         }
     }
+    #[inline(always)]
     fn u32_to_bytes(self, value: u32) -> [u8; 4] {
         match self {
             Endianness::BigEndian => BigEndian.u32_to_bytes(value),
             Endianness::LittleEndian => LittleEndian.u32_to_bytes(value),
         }
     }
+    #[inline(always)]
     fn u64_from_bytes(self, bytes: [u8; 8]) -> u64 {
         match self {
             Endianness::BigEndian => BigEndian.u64_from_bytes(bytes),
@@ -132,6 +147,7 @@ pub(crate) trait ExtendedByteOrder: ByteOrder {
     fn try_u32_from_bytes(self, bytes: &[u8]) -> Result<u32, UnexpectedSize>;
 }
 impl<B: ByteOrder> ExtendedByteOrder for B {
+    #[inline(always)]
     fn try_u16_from_bytes(self, bytes: &[u8]) -> Result<u16, UnexpectedSize> {
         if bytes.len() != 2 {
             return Err(UnexpectedSize {
@@ -142,7 +158,7 @@ impl<B: ByteOrder> ExtendedByteOrder for B {
         }
         Ok(self.u16_from_bytes([bytes[0], bytes[1]]))
     }
-
+    #[inline(always)]
     fn try_u32_from_bytes(self, bytes: &[u8]) -> Result<u32, UnexpectedSize> {
         if bytes.len() != 4 {
             return Err(UnexpectedSize {
@@ -176,6 +192,7 @@ impl<R: Read> ReadExt for R {
         self.read_exact(&mut buffer)?;
         Ok(byte_order.u32_from_bytes(buffer))
     }
+    #[inline(always)]
     fn read_bytes<const SIZE: usize>(&mut self) -> Result<[u8; SIZE], std::io::Error> {
         let mut buffer = [0u8; SIZE];
         self.read_exact(&mut buffer)?;

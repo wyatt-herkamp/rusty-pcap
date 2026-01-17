@@ -1,5 +1,5 @@
 //! Block Types for pcap-ng files
-use std::io::Read;
+use std::io::{Read, Write};
 
 use crate::{
     byte_order::{ByteOrder, Endianness, ReadExt, UnexpectedSize},
@@ -19,12 +19,13 @@ pub use header::{SHBOptionCodes, SectionHeaderBlock};
 pub use interface::{InterfaceDescriptionBlock, InterfaceOptionCodes};
 pub use name_resolution::NameResolutionBlock;
 pub use simple_packet::SimplePacket;
-pub trait Block {
+pub trait Block<'b> {
     /// Returns the block ID for this block type
     fn block_id() -> u32
     where
         Self: Sized;
     /// Returns the block ID in little-endian format
+    #[inline(always)]
     fn block_id_le() -> [u8; 4]
     where
         Self: Sized,
@@ -32,6 +33,7 @@ pub trait Block {
         Self::block_id().to_le_bytes()
     }
     /// Returns the block ID in big-endian format
+    #[inline(always)]
     fn block_id_be() -> [u8; 4]
     where
         Self: Sized,
@@ -53,9 +55,22 @@ pub trait Block {
         reader: &mut R,
         header: &BlockHeader,
         byte_order: Option<Endianness>,
+        packet_buffer: &'b mut Vec<u8>,
     ) -> Result<Self, PcapNgParseError>
     where
-        Self: Sized;
+        Self: Sized + 'b;
+
+    fn read_with_header_no_block_check<R: Read>(
+        reader: &mut R,
+        header: &BlockHeader,
+        byte_order: Endianness,
+        packet_buffer: &'b mut Vec<u8>,
+    ) -> Result<Self, PcapNgParseError>
+    where
+        Self: Sized + 'b,
+    {
+        Self::read_with_header(reader, header, Some(byte_order), packet_buffer)
+    }
 }
 #[cfg(feature = "tokio-async")]
 mod tokio_block {
@@ -73,7 +88,7 @@ mod tokio_block {
         },
     };
 
-    pub trait TokioAsyncBlock: Block {
+    pub trait TokioAsyncBlock<'b>: Block<'b> {
         /// Asynchronously reads the block from the reader with the given header and byte order
         ///
         /// # Default Implementation
@@ -84,9 +99,10 @@ mod tokio_block {
             reader: &mut R,
             header: &BlockHeader,
             byte_order: Option<Endianness>,
+            buffer: &'b mut Vec<u8>,
         ) -> impl Future<Output = Result<Self, PcapNgParseError>>
         where
-            Self: Sized,
+            Self: Sized + 'b,
         {
             async move {
                 header.matches_block_id::<Self>()?;
@@ -97,40 +113,63 @@ mod tokio_block {
                 let mut content = vec![0u8; block_length];
                 reader.read_exact(&mut content).await?;
                 let mut cursor = std::io::Cursor::new(content);
-                Self::read_with_header(&mut cursor, header, byte_order)
+                Self::read_with_header(&mut cursor, header, byte_order, buffer)
             }
         }
     }
-    impl PcapNgBlock {
+    impl<'b> PcapNgBlock<'b> {
         pub async fn read_async<R: AsyncRead + Unpin>(
             reader: &mut R,
             header: &BlockHeader,
             byte_order: Endianness,
+            packet_buffer: &'b mut Vec<u8>,
         ) -> Result<Self, PcapNgParseError> {
             let block_id = header.block_id_as_u32(byte_order);
             match block_id {
                 168627466 => Ok(PcapNgBlock::SectionHeader(
-                    SectionHeaderBlock::async_read_with_header(reader, header, Some(byte_order))
-                        .await?,
+                    SectionHeaderBlock::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
                 )),
                 1 => Ok(PcapNgBlock::InterfaceDescription(
                     InterfaceDescriptionBlock::async_read_with_header(
                         reader,
                         header,
                         Some(byte_order),
+                        packet_buffer,
                     )
                     .await?,
                 )),
                 3 => Ok(PcapNgBlock::SimplePacket(
-                    SimplePacket::async_read_with_header(reader, header, Some(byte_order)).await?,
+                    SimplePacket::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
                 )),
                 4 => Ok(PcapNgBlock::NameResolution(
-                    NameResolutionBlock::async_read_with_header(reader, header, Some(byte_order))
-                        .await?,
+                    NameResolutionBlock::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
                 )),
                 6 => Ok(PcapNgBlock::EnhancedPacket(
-                    EnhancedPacket::async_read_with_header(reader, header, Some(byte_order))
-                        .await?,
+                    EnhancedPacket::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
                 )),
                 _ => Ok(PcapNgBlock::Generic(
                     GenericBlock::read_async_with_header(reader, header, byte_order).await?,
@@ -179,7 +218,7 @@ impl BlockHeader {
         Ok(Self::new(block_id, block_length))
     }
     /// Checks if the block ID matches the expected block ID for the given block type
-    pub(crate) fn matches_block_id<B: Block>(&self) -> Result<(), PcapNgParseError> {
+    pub(crate) fn matches_block_id<'b, B: Block<'b>>(&self) -> Result<(), PcapNgParseError> {
         if self.block_id != B::block_id_le() && self.block_id != B::block_id_be() {
             return Err(PcapNgParseError::UnexpectedBlockId {
                 expected_be: B::block_id().to_be_bytes(),
@@ -190,7 +229,7 @@ impl BlockHeader {
         Ok(())
     }
     /// Will panic if the block ID does not match the expected block ID for the given block type
-    pub(crate) fn endianness_from_block<B: Block>(&self) -> Option<Endianness> {
+    pub(crate) fn endianness_from_block<'b, B: Block<'b>>(&self) -> Option<Endianness> {
         debug_assert_ne!(
             B::block_id_be(),
             B::block_id_le(),
@@ -205,40 +244,70 @@ impl BlockHeader {
             None
         }
     }
+    pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        writer.write_all(&self.block_id)?;
+        writer.write_all(&self.block_length)?;
+        Ok(())
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PcapNgBlock {
+pub enum PcapNgBlock<'b> {
     SectionHeader(SectionHeaderBlock),
     InterfaceDescription(InterfaceDescriptionBlock),
-    SimplePacket(SimplePacket),
-    EnhancedPacket(EnhancedPacket),
+    SimplePacket(SimplePacket<'b>),
+    EnhancedPacket(EnhancedPacket<'b>),
     NameResolution(NameResolutionBlock),
     Generic(GenericBlock),
 }
-impl PcapNgBlock {
+impl<'b> PcapNgBlock<'b> {
     pub fn read<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
         byte_order: Endianness,
+        packet_buffer: &'b mut Vec<u8>,
     ) -> Result<Self, PcapNgParseError> {
         let block_id = header.block_id_as_u32(byte_order);
         match block_id {
+            6 => Ok(PcapNgBlock::EnhancedPacket(
+                EnhancedPacket::read_with_header_no_block_check(
+                    reader,
+                    header,
+                    byte_order,
+                    packet_buffer,
+                )?,
+            )),
+            3 => Ok(PcapNgBlock::SimplePacket(
+                SimplePacket::read_with_header_no_block_check(
+                    reader,
+                    header,
+                    byte_order,
+                    packet_buffer,
+                )?,
+            )),
             168627466 => Ok(PcapNgBlock::SectionHeader(
-                SectionHeaderBlock::read_with_header(reader, header, Some(byte_order))?,
+                SectionHeaderBlock::read_with_header(
+                    reader,
+                    header,
+                    Some(byte_order),
+                    packet_buffer,
+                )?,
             )),
             1 => Ok(PcapNgBlock::InterfaceDescription(
-                InterfaceDescriptionBlock::read_with_header(reader, header, Some(byte_order))?,
+                InterfaceDescriptionBlock::read_with_header(
+                    reader,
+                    header,
+                    Some(byte_order),
+                    packet_buffer,
+                )?,
             )),
-            3 => Ok(PcapNgBlock::SimplePacket(SimplePacket::read_with_header(
-                reader,
-                header,
-                Some(byte_order),
-            )?)),
+
             4 => Ok(PcapNgBlock::NameResolution(
-                NameResolutionBlock::read_with_header(reader, header, Some(byte_order))?,
-            )),
-            6 => Ok(PcapNgBlock::EnhancedPacket(
-                EnhancedPacket::read_with_header(reader, header, Some(byte_order))?,
+                NameResolutionBlock::read_with_header(
+                    reader,
+                    header,
+                    Some(byte_order),
+                    packet_buffer,
+                )?,
             )),
 
             _ => Ok(PcapNgBlock::Generic(GenericBlock::read_with_header(

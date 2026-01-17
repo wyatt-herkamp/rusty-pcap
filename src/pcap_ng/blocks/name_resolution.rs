@@ -58,7 +58,7 @@ pub struct NameResolutionBlock {
     pub records: Records,
     pub options: Option<BlockOptions>,
 }
-impl Block for NameResolutionBlock {
+impl<'b> Block<'b> for NameResolutionBlock {
     fn block_id() -> u32 {
         4
     }
@@ -70,6 +70,7 @@ impl Block for NameResolutionBlock {
         reader: &mut R,
         header: &BlockHeader,
         byte_order: Option<Endianness>,
+        _: &'b mut Vec<u8>,
     ) -> Result<Self, PcapNgParseError>
     where
         Self: Sized,
@@ -98,11 +99,11 @@ impl Block for NameResolutionBlock {
 mod tokio_async {
     use crate::pcap_ng::blocks::{NameResolutionBlock, tokio_block::TokioAsyncBlock};
 
-    impl TokioAsyncBlock for NameResolutionBlock {}
+    impl<'b> TokioAsyncBlock<'b> for NameResolutionBlock {}
 }
-impl NameResolutionBlock {
-    pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
-        let header = BlockHeader::read(reader)?;
-        Self::read_with_header::<_>(reader, &header, Some(byte_order))
-    }
-}
+//impl NameResolutionBlock {
+//    pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
+//        let header = BlockHeader::read(reader)?;
+//        Self::read_with_header::<_>(reader, &header, Some(byte_order))
+//    }
+//}

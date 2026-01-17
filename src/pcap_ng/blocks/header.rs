@@ -26,7 +26,7 @@ pub struct SectionHeaderBlock {
     pub section_length: Option<u64>,
     pub options: Option<BlockOptions>,
 }
-impl Block for SectionHeaderBlock {
+impl<'b> Block<'b> for SectionHeaderBlock {
     fn block_id() -> u32 {
         168627466
     }
@@ -44,6 +44,7 @@ impl Block for SectionHeaderBlock {
         reader: &mut R,
         header: &BlockHeader,
         _byte_order: Option<Endianness>,
+        _: &mut Vec<u8>,
     ) -> Result<Self, PcapNgParseError>
     where
         Self: Sized,
@@ -84,9 +85,12 @@ impl Block for SectionHeaderBlock {
 }
 impl SectionHeaderBlock {
     /// Reads the entire block from the reader
-    pub fn read_from_reader<R: Read>(reader: &mut R) -> Result<Self, PcapNgParseError> {
+    pub fn read_from_reader<R: Read>(
+        reader: &mut R,
+        buffer: &mut Vec<u8>,
+    ) -> Result<Self, PcapNgParseError> {
         let header = BlockHeader::read(reader)?;
-        Self::read_with_header::<_>(reader, &header, None)
+        Self::read_with_header::<_>(reader, &header, None, buffer)
     }
 }
 #[cfg(feature = "tokio-async")]
@@ -101,11 +105,12 @@ mod tokio_async {
         },
     };
 
-    impl TokioAsyncBlock for SectionHeaderBlock {
+    impl<'b> TokioAsyncBlock<'b> for SectionHeaderBlock {
         async fn async_read_with_header<R: tokio::io::AsyncRead + Unpin>(
             reader: &mut R,
             header: &BlockHeader,
             _byte_order: Option<Endianness>,
+            _: &mut Vec<u8>,
         ) -> Result<Self, PcapNgParseError>
         where
             Self: Sized,
@@ -159,8 +164,9 @@ mod tests {
             49, 0, 0, 0, 0, 0, 96, 0, 0, 0,
         ];
         let mut reader = std::io::Cursor::new(&content);
+        let mut buffer: Vec<u8> = Vec::new();
 
-        let block = SectionHeaderBlock::read_from_reader(&mut reader)?;
+        let block = SectionHeaderBlock::read_from_reader(&mut reader, &mut buffer)?;
         assert_eq!(block.block_length, 96);
         assert_eq!(block.byte_order, Endianness::LittleEndian);
         assert_eq!(block.version.major, 1);

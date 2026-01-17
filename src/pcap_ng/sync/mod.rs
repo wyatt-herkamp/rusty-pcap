@@ -19,6 +19,7 @@ pub struct SyncPcapNgReader<R: Read> {
     ///
     /// Will reset each time a new section header block is read
     interfaces: Vec<InterfaceDescriptionBlock>,
+    buffer: Vec<u8>,
 }
 impl<R: Read> SyncPcapNgReader<R> {
     /// Creates a new `SyncPcapReader` from a reader
@@ -27,11 +28,14 @@ impl<R: Read> SyncPcapNgReader<R> {
     ///
     /// A buffer is allocated based on the snap length in the file header
     pub fn new(mut reader: R) -> Result<Self, PcapNgParseError> {
-        let current_section = SectionHeaderBlock::read_from_reader(&mut reader)?;
+        let mut buffer = Vec::with_capacity(0); // Default buffer size
+        let current_section = SectionHeaderBlock::read_from_reader(&mut reader, &mut buffer)?;
+        let buffer = vec![0u8; 65536];
         Ok(Self {
             reader,
             current_section,
             interfaces: Vec::with_capacity(1),
+            buffer,
         })
     }
     pub(crate) fn new_with_section(reader: R, current_section: SectionHeaderBlock) -> Self {
@@ -39,6 +43,7 @@ impl<R: Read> SyncPcapNgReader<R> {
             reader,
             current_section,
             interfaces: Vec::with_capacity(1),
+            buffer: vec![0u8; 65536], // Default buffer size
         }
     }
     /// Returns the file header of the pcap file
@@ -56,7 +61,7 @@ impl<R: Read> SyncPcapNgReader<R> {
     pub fn interfaces(&self) -> &[InterfaceDescriptionBlock] {
         &self.interfaces
     }
-    pub fn next_block(&mut self) -> Result<Option<PcapNgBlock>, PcapNgParseError> {
+    pub fn next_block(&mut self) -> Result<Option<PcapNgBlock<'_>>, PcapNgParseError> {
         let mut header_bytes = [0u8; 8];
         match self.reader.read_exact(&mut header_bytes) {
             Ok(_) => {}
@@ -67,7 +72,12 @@ impl<R: Read> SyncPcapNgReader<R> {
         }
         let header = BlockHeader::parse_from_bytes(&header_bytes)?;
 
-        let result = PcapNgBlock::read(&mut self.reader, &header, self.current_section.byte_order)?;
+        let result = PcapNgBlock::read(
+            &mut self.reader,
+            &header,
+            self.current_section.byte_order,
+            &mut self.buffer,
+        )?;
         match &result {
             PcapNgBlock::InterfaceDescription(interface_block) => {
                 self.interfaces.push(interface_block.clone());
@@ -85,31 +95,29 @@ impl<R: Read> SyncPcapNgReader<R> {
     /// If any other block types are encountered, they will be skipped until a packet block is found
     ///
     /// When Ok(None) is returned, it indicates the end of the file has been reached
-    pub fn next_packet(&mut self) -> Result<Option<(AnyPacketHeader, Vec<u8>)>, PcapNgParseError> {
+    pub fn next_packet(&mut self) -> Result<Option<(AnyPacketHeader, &[u8])>, PcapNgParseError> {
         while let Some(block) = self.next_block()? {
             match block {
                 PcapNgBlock::EnhancedPacket(enhanced_packet) => {
-                    return Ok(Some((
-                        AnyPacketHeader::PcapNgEnhanced {
-                            block_length: enhanced_packet.block_length,
-                            original_length: enhanced_packet.original_length,
-                            interface_id: enhanced_packet.interface_id,
-                            timestamp_high: enhanced_packet.timestamp_high,
-                            timestamp_low: enhanced_packet.timestamp_low,
-                            captured_length: enhanced_packet.captured_length,
-                            options: enhanced_packet.options,
-                        },
-                        enhanced_packet.content,
-                    )));
+                    let packet_length = enhanced_packet.content.len();
+                    let header = AnyPacketHeader::PcapNgEnhanced {
+                        block_length: enhanced_packet.block_length,
+                        original_length: enhanced_packet.original_length,
+                        interface_id: enhanced_packet.interface_id,
+                        timestamp_high: enhanced_packet.timestamp_high,
+                        timestamp_low: enhanced_packet.timestamp_low,
+                        captured_length: enhanced_packet.captured_length,
+                        options: enhanced_packet.options,
+                    };
+                    return Ok(Some((header, &self.buffer[..packet_length])));
                 }
                 PcapNgBlock::SimplePacket(simple_packet) => {
-                    return Ok(Some((
-                        AnyPacketHeader::PcapNgSimple {
-                            block_length: simple_packet.block_length,
-                            original_length: simple_packet.original_length,
-                        },
-                        simple_packet.content,
-                    )));
+                    let packet_length = simple_packet.content.len();
+                    let header = AnyPacketHeader::PcapNgSimple {
+                        block_length: simple_packet.block_length,
+                        original_length: simple_packet.original_length,
+                    };
+                    return Ok(Some((header, &self.buffer[..packet_length])));
                 }
                 _ => {
                     // Continue to the next block
@@ -157,7 +165,7 @@ mod tests {
             };
             println!("---- Packet: (Block Length {}) ----", packet.block_length);
             let parse =
-                SlicedPacket::from_ethernet(&packet.content).expect("Failed to parse packet");
+                SlicedPacket::from_ethernet(packet.content).expect("Failed to parse packet");
             let Some(net_slice) = parse.net else {
                 panic!("Expected a network layer slice, got: {:?}", parse);
             };
