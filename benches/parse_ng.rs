@@ -8,7 +8,8 @@ use std::{fs::File, hint::black_box, io::BufReader};
 fn parse_ng_with_rusty_pcap(c: &mut Criterion) {
     c.bench_function("parse_ng_with_rusty_pcap", |b| {
         b.iter(|| {
-            let file = File::open("test_data/test.pcapng").unwrap();
+            let file =
+                File::open("/media/Other/polygon-io/utp.trades.2023.04.12.truncated.pcap").unwrap();
             let packets = SyncPcapNgReader::new(BufReader::new(file));
             let mut packets = packets.unwrap();
             while let Ok(Some(block)) = black_box(packets.next_block()) {
@@ -45,7 +46,9 @@ fn parse_ng_with_rusty_pcap_no_io(c: &mut Criterion) {
 fn parse_ng_with_libpcap(c: &mut Criterion) {
     c.bench_function("parse_ng_with_libpcap", |b| {
         b.iter(|| {
-            let packets = pcap::Capture::from_file("test_data/test.pcapng");
+            let packets = pcap::Capture::from_file(
+                "/media/Other/polygon-io/utp.trades.2023.04.12.truncated.pcap",
+            );
             let mut packets = packets.unwrap();
             while let Ok(packet) = black_box(packets.next_packet()) {
                 let _ = black_box(packet);
@@ -54,10 +57,10 @@ fn parse_ng_with_libpcap(c: &mut Criterion) {
     });
 }
 criterion_group!(
-    ng_benches,
-    parse_ng_with_rusty_pcap,
-    parse_ng_with_rusty_pcap_no_buf,
+    name = ng_benches;
+    config = Criterion::default().sample_size(20);
+
+    targets =parse_ng_with_rusty_pcap, parse_ng_with_libpcap,    parse_ng_with_rusty_pcap_no_buf,
     parse_ng_with_rusty_pcap_no_io,
-    parse_ng_with_libpcap
 );
 criterion_main!(ng_benches);
