@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
+## [0.6.0] (Unreleased)
+- Encourage Proper Size Buffer Usage inside async pcap reader
+  - `AsyncPcapReader::new` will now create a BufReader and return `AsyncPcapReader<BufReader<R>>`
+  - `AsyncPcapReader::with_buf_reader` uses a predefined BufReader and returns `AsyncPcapReader<BufReader<R>>`
+  - `AsyncPcapReader::new_without_buffer` is used when no buffer is desired and returns `AsyncPcapReader<R>`
+- Added Async Benchmarking
 ## [0.5.0] (2026-01-30)
 - Added AnyPcapReader to read both pcap and pcapng files
 - Introduce AsyncPcapNgReader for asynchronous pcapng reading

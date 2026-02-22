@@ -3,7 +3,7 @@ use crate::{
     Version,
     pcap::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHeader},
 };
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 #[derive(Debug)]
 pub struct AsyncPcapReader<R: AsyncRead + Unpin> {
     reader: R,
@@ -13,13 +13,29 @@ pub struct AsyncPcapReader<R: AsyncRead + Unpin> {
     header_buffer: [u8; 16],
     file_header: PcapFileHeader,
 }
-impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
+impl<R: AsyncRead + Unpin> AsyncPcapReader<BufReader<R>> {
     /// Creates a new `AsyncPcapReader` from a reader
     /// Returns `Ok(Self)` on success, or `Err` if there was an error
     /// reading the file header
     ///
-    /// A buffer is allocated based on the snap length in the file header
+    /// A buffer is allocated based on the snap length in the file header then the reader is wrapped in a `BufReader` with a capacity of snap length + 16 (for the packet header)
     pub async fn new(mut reader: R) -> Result<Self, PcapParseError> {
+        let mut file_header = [0u8; 24];
+        reader.read_exact(&mut file_header).await?;
+        let file_header = PcapFileHeader::try_from(&file_header)?;
+        let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
+        let reader = BufReader::with_capacity(file_header.snap_length as usize + 16, reader);
+        Ok(Self {
+            reader,
+            buffer,
+            file_header,
+            header_buffer: [0; 16],
+        })
+    }
+    /// Creates a new `AsyncPcapReader` from a `BufReader`
+    /// Returns `Ok(Self)` on success, or `Err` if there was an error
+    /// reading the file header
+    pub async fn with_buf_reader(mut reader: BufReader<R>) -> Result<Self, PcapParseError> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
         let file_header = PcapFileHeader::try_from(&file_header)?;
@@ -31,6 +47,27 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
             header_buffer: [0; 16],
         })
     }
+}
+impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
+    /// Creates a new `AsyncPcapReader` from a reader
+    /// Returns `Ok(Self)` on success, or `Err` if there was an error
+    /// reading the file header
+    ///
+    /// No ReadBuffer is created and the reader is not wrapped in a `BufReader`.
+    /// This is useful if the caller wants to manage their own buffer and does not want the overhead of a `BufReader`
+    pub async fn new_without_buffer(mut reader: R) -> Result<Self, PcapParseError> {
+        let mut file_header = [0u8; 24];
+        reader.read_exact(&mut file_header).await?;
+        let file_header = PcapFileHeader::try_from(&file_header)?;
+        let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
+        Ok(Self {
+            reader,
+            buffer,
+            file_header,
+            header_buffer: [0; 16],
+        })
+    }
+
     pub(crate) fn new_with_header(reader: R, file_header: PcapFileHeader) -> Self {
         let buffer = vec![0u8; file_header.snap_length as usize].into_boxed_slice();
         Self {

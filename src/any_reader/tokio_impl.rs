@@ -89,6 +89,8 @@ pub struct AsyncAnyPcapReader<R: AsyncRead + Unpin> {
 }
 impl<R: AsyncRead + Unpin> AsyncAnyPcapReader<R> {
     /// Creates a new `SyncAnyPcapReader` from a reader
+    ///
+    /// A Buffered Reader should not be passed into this function as we will internally create one
     pub async fn new(reader: R) -> Result<Self, AnyPcapReaderError> {
         let inner = AsyncAnyPcapReaderInner::new(reader).await?;
         Ok(Self { inner })

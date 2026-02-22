@@ -24,11 +24,11 @@ anyhow = "1.0"
 # Used Internally to make sure the packets are not malformed
 etherparse = "0.19"
 tokio = { version = "1", features = ["full"] }
-criterion = "0.8"
+criterion = { version = "0.8", features = ["async_tokio"] }
 pcap = { version = "2" }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
-
+rusty-pcap = { path = ".", features = ["tokio-async", "chrono"] }
 [lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
@@ -40,6 +40,12 @@ name = "parse_ng"
 harness = false
 [[bench]]
 name = "parse_ng_blocks"
+harness = false
+[[bench]]
+name = "parse_async"
+harness = false
+[[bench]]
+name = "pcap_packet_header"
 harness = false
 [package.metadata.docs.rs]
 features = ["tokio-async", "chrono"]

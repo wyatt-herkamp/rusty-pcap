@@ -41,6 +41,7 @@ fn parse_with_libpcap(c: &mut Criterion) {
         })
     });
 }
+
 criterion_group!(
     benches,
     parse_with_rusty_pcap,
