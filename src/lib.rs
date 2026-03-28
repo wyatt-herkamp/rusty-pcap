@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 //! rusty-pcap is a pcap library for Rust
 //!
 //! 100% Rust implementation of a pcap reader

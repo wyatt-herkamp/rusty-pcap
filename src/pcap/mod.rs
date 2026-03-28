@@ -11,6 +11,10 @@ mod tokio_impl;
 use thiserror::Error;
 #[cfg(feature = "tokio-async")]
 pub use tokio_impl::AsyncPcapReader;
+#[cfg(feature = "tokio-async")]
+pub use tokio_impl::AsyncPooledPcapReader;
+#[cfg(feature = "tokio-async")]
+pub use tokio_impl::buffer_pool::{BufferPool, PooledPacket};
 
 use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 
