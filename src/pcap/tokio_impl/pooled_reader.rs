@@ -80,20 +80,6 @@ impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<R> {
         })
     }
 
-    pub(crate) fn new_with_header(
-        reader: R,
-        file_header: PcapFileHeader,
-        pool_size: usize,
-    ) -> Self {
-        let pool = BufferPool::new(pool_size, file_header.snap_length);
-        Self {
-            reader,
-            file_header,
-            header_buffer: [0; 16],
-            pool,
-        }
-    }
-
     /// Returns the file header of the pcap file.
     pub fn file_header(&self) -> &PcapFileHeader {
         &self.file_header
