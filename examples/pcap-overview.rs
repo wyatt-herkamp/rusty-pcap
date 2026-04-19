@@ -30,9 +30,10 @@ fn main() -> anyhow::Result<()> {
             lowest_packet_size = packet_size;
         }
     }
-    if packet_count > 0 {
-        average_number_of_bytes /= packet_count;
-    }
+    average_number_of_bytes = average_number_of_bytes
+        .checked_div(packet_count)
+        .unwrap_or(0);
+
     println!("-- PCAP File Overview --");
     println!("Total packets in pcap file: {}", packet_count);
     println!(
