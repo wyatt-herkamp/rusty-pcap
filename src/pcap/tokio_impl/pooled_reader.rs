@@ -1,4 +1,6 @@
 //! Asynchronous reader for PCAP files using a buffer pool
+use std::num::NonZeroUsize;
+
 use crate::{
     Version,
     pcap::{PcapParseError, file_header::PcapFileHeader, packet_header::PacketHeader},
@@ -30,7 +32,7 @@ impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<BufReader<R>> {
     /// A buffer pool of `pool_size` buffers is allocated based on the snap length
     /// in the file header. The reader is wrapped in a `BufReader` with a capacity
     /// of snap length + 16.
-    pub async fn new(mut reader: R, pool_size: usize) -> Result<Self, PcapParseError> {
+    pub async fn new(mut reader: R, pool_size: NonZeroUsize) -> Result<Self, PcapParseError> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
         let file_header = PcapFileHeader::try_from(&file_header)?;
@@ -47,7 +49,7 @@ impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<BufReader<R>> {
     /// Creates a new `AsyncPooledPcapReader` from a `BufReader`.
     pub async fn with_buf_reader(
         mut reader: BufReader<R>,
-        pool_size: usize,
+        pool_size: NonZeroUsize,
     ) -> Result<Self, PcapParseError> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
@@ -64,9 +66,18 @@ impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<BufReader<R>> {
 
 impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<R> {
     /// Creates a new `AsyncPooledPcapReader` from a reader without wrapping in a `BufReader`.
+    ///
+    /// # Arguments
+    /// * `reader` - The async reader to read pcap data from.
+    /// * `pool_size` - The number of packet buffers to allocate in the pool.
+    ///
+    /// ## Pool Size
+    ///
+    /// The number of packet buffers that will be allocated in the pool.
+    /// This means you will have snap_length * pool_size bytes allocated for packet buffers.
     pub async fn new_without_buffer(
         mut reader: R,
-        pool_size: usize,
+        pool_size: NonZeroUsize,
     ) -> Result<Self, PcapParseError> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
@@ -138,10 +149,12 @@ impl<R: AsyncRead + Unpin> AsyncPooledPcapReader<R> {
             return Err(PcapParseError::IO(err));
         }
 
-        Ok(Some(
-            self.pool
-                .create_packet(packet_header, data_len, slot_index, buffer),
-        ))
+        Ok(Some(self.pool.create_packet(
+            packet_header,
+            data_len,
+            slot_index,
+            buffer,
+        )))
     }
 }
 
@@ -156,7 +169,7 @@ mod tests {
         let file = tokio::fs::File::open("test_data/test.pcap")
             .await
             .expect("Failed to open test.pcap");
-        let mut reader = AsyncPooledPcapReader::new(file, 8)
+        let mut reader = AsyncPooledPcapReader::new(file, NonZeroUsize::new(8).unwrap())
             .await
             .expect("Failed to create AsyncPooledPcapReader");
 
@@ -167,7 +180,11 @@ mod tests {
             if let Some(net_slice) = parse.net {
                 match net_slice {
                     NetSlice::Ipv4(ipv4) => {
-                        println!("IPv4: {:?} -> {:?}", ipv4.header().source_addr(), ipv4.header().destination_addr());
+                        println!(
+                            "IPv4: {:?} -> {:?}",
+                            ipv4.header().source_addr(),
+                            ipv4.header().destination_addr()
+                        );
                     }
                     NetSlice::Ipv6(ipv6) => {
                         println!("IPv6: {:?}", ipv6.header());
@@ -187,7 +204,7 @@ mod tests {
         let file = tokio::fs::File::open("test_data/test.pcap")
             .await
             .expect("Failed to open test.pcap");
-        let mut reader = AsyncPooledPcapReader::new(file, 4)
+        let mut reader = AsyncPooledPcapReader::new(file, NonZeroUsize::new(4).unwrap())
             .await
             .expect("Failed to create AsyncPooledPcapReader");
 

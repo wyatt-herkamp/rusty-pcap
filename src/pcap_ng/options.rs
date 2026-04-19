@@ -174,13 +174,9 @@ impl BlockOptions {
         reader: &mut R,
         byte_order: B,
     ) -> Result<(), OptionParseError> {
-        loop {
-            let Some((option_code, option_length, pen)) =
-                Self::read_option_header(reader, byte_order)?
-            else {
-                break; // No more options to read
-            };
-
+        while let Some((option_code, option_length, pen)) =
+            Self::read_option_header(reader, byte_order)?
+        {
             let padded_length = pad_length_to_32_bytes(option_length as usize);
             let mut option_value = vec![0u8; padded_length];
             reader.read_exact(&mut option_value)?;

@@ -6,8 +6,11 @@
 
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+use tokio::sync::Semaphore;
 
 use crate::pcap::packet_header::PacketHeader;
 
@@ -41,7 +44,7 @@ struct BufferPoolInner {
     /// push/pop to prevent ABA on the index.
     top: AtomicU64,
     /// Semaphore for async waiting when the pool is exhausted.
-    semaphore: tokio::sync::Semaphore,
+    semaphore: Semaphore,
     buffer_size: u32,
     pool_size: usize,
 }
@@ -54,7 +57,9 @@ unsafe impl Send for BufferPoolInner {}
 unsafe impl Sync for BufferPoolInner {}
 
 impl BufferPoolInner {
-    fn new(pool_size: usize, buffer_size: u32) -> Self {
+    /// Creates a new buffer pool with the given number of buffers and buffer size.
+    fn new(pool_size: NonZeroUsize, buffer_size: u32) -> Self {
+        let pool_size = pool_size.get();
         let slots: Box<[_]> = (0..pool_size)
             .map(|_| UnsafeCell::new(Some(vec![0u8; buffer_size as usize].into_boxed_slice())))
             .collect();
@@ -74,7 +79,7 @@ impl BufferPoolInner {
             slots,
             next,
             top: AtomicU64::new(pack(0, 0)),
-            semaphore: tokio::sync::Semaphore::new(pool_size),
+            semaphore: Semaphore::new(pool_size),
             buffer_size,
             pool_size,
         }
@@ -176,7 +181,7 @@ pub struct BufferPool {
 
 impl BufferPool {
     /// Creates a new buffer pool with `pool_size` buffers, each of `buffer_size` bytes.
-    pub fn new(pool_size: usize, buffer_size: u32) -> Self {
+    pub fn new(pool_size: NonZeroUsize, buffer_size: u32) -> Self {
         Self {
             inner: Arc::new(BufferPoolInner::new(pool_size, buffer_size)),
         }
@@ -281,6 +286,11 @@ pub struct PooledPacket {
     pool: Arc<BufferPoolInner>,
     slot_index: u32,
 }
+impl AsRef<PacketHeader> for PooledPacket {
+    fn as_ref(&self) -> &PacketHeader {
+        &self.header
+    }
+}
 
 impl PooledPacket {
     /// Returns the packet header.
@@ -337,7 +347,10 @@ mod tests {
 
     fn dummy_header() -> PacketHeader {
         PacketHeader {
-            timestamp: PacketTimestamp { seconds: 0, usec: 0 },
+            timestamp: PacketTimestamp {
+                seconds: 0,
+                usec: 0,
+            },
             include_len: 10,
             orig_len: 10,
         }
@@ -345,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn acquire_and_return() {
-        let pool = BufferPool::new(4, 128);
+        let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 128);
         assert_eq!(pool.pool_size(), 4);
         assert_eq!(pool.buffer_size(), 128);
 
@@ -384,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn pool_waits_when_empty() {
-        let pool = BufferPool::new(1, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 64);
 
         // Acquire the only buffer
         let (idx, buf) = pool.acquire().await.expect("acquire");
@@ -411,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn pooled_packet_returns_buffer_on_drop() {
-        let pool = BufferPool::new(1, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 64);
 
         let (idx, mut buf) = pool.acquire().await.expect("acquire");
         buf[..5].copy_from_slice(b"hello");
@@ -433,21 +446,21 @@ mod tests {
 
     #[tokio::test]
     async fn pooled_packet_deref() {
-        let pool = BufferPool::new(1, 32);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 32);
         let (idx, mut buf) = pool.acquire().await.expect("acquire");
         buf[..3].copy_from_slice(&[1, 2, 3]);
 
         let packet = pool.create_packet(dummy_header(), 3, idx, buf);
 
         // Test Deref
-        let slice: &[u8] = &*packet;
+        let slice: &[u8] = &packet;
         assert_eq!(slice, &[1, 2, 3]);
         assert_eq!(packet.len(), 3);
     }
 
     #[tokio::test]
     async fn concurrent_acquire_release() {
-        let pool = BufferPool::new(4, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 64);
         let mut handles = Vec::new();
 
         for _ in 0..8 {
@@ -480,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_pooled_packet_through_channel() {
-        let pool = BufferPool::new(2, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(2).unwrap(), 64);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<PooledPacket>(4);
 
         let pool_clone = pool.clone();
@@ -505,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn packet_data_write_then_read() {
-        let pool = BufferPool::new(1, 256);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 256);
         let (idx, mut buf) = pool.acquire().await.expect("acquire");
 
         let data = b"packet payload data";
@@ -521,7 +534,7 @@ mod tests {
 
     #[test]
     fn debug_impls() {
-        let pool = BufferPool::new(2, 128);
+        let pool = BufferPool::new(NonZeroUsize::new(2).unwrap(), 128);
         let debug = format!("{:?}", pool);
         assert!(debug.contains("BufferPool"));
         assert!(debug.contains("128"));
@@ -541,7 +554,7 @@ mod tests {
 
     #[test]
     fn miri_try_acquire_and_return() {
-        let pool = BufferPool::new(3, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(3).unwrap(), 64);
 
         let (idx0, buf0) = pool.try_acquire().expect("acquire 0");
         let (idx1, buf1) = pool.try_acquire().expect("acquire 1");
@@ -567,7 +580,7 @@ mod tests {
 
     #[test]
     fn miri_pooled_packet_drop_returns_buffer() {
-        let pool = BufferPool::new(1, 32);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 32);
 
         let (idx, mut buf) = pool.try_acquire().expect("acquire");
         buf[..3].copy_from_slice(&[10, 20, 30]);
@@ -588,12 +601,12 @@ mod tests {
 
     #[test]
     fn miri_pooled_packet_deref() {
-        let pool = BufferPool::new(1, 16);
+        let pool = BufferPool::new(NonZeroUsize::new(1).unwrap(), 16);
         let (idx, mut buf) = pool.try_acquire().expect("acquire");
         buf[..4].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
 
         let packet = pool.create_packet(dummy_header(), 4, idx, buf);
-        let slice: &[u8] = &*packet;
+        let slice: &[u8] = &packet;
         assert_eq!(slice, &[0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
@@ -601,7 +614,7 @@ mod tests {
     fn miri_concurrent_threads() {
         use std::sync::Barrier;
 
-        let pool = BufferPool::new(4, 64);
+        let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 64);
         let barrier = Arc::new(Barrier::new(4));
         let mut handles = Vec::new();
 
@@ -638,7 +651,7 @@ mod tests {
 
     #[test]
     fn miri_multiple_packets_lifecycle() {
-        let pool = BufferPool::new(3, 128);
+        let pool = BufferPool::new(NonZeroUsize::new(3).unwrap(), 128);
 
         // Create 3 packets
         let mut packets = Vec::new();

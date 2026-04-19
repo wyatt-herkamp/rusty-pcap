@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
+use std::num::NonZeroUsize;
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rusty_pcap::pcap::{AsyncPcapReader, AsyncPooledPcapReader};
 use tokio::{fs::File, io::BufReader};
@@ -48,7 +50,9 @@ fn parse_with_pooled_reader(c: &mut Criterion) {
                     .iter(|| async move {
                         let file = File::open("test_data/test.pcap").await.unwrap();
                         let mut packets =
-                            AsyncPooledPcapReader::new(file, pool_size).await.unwrap();
+                            AsyncPooledPcapReader::new(file, NonZeroUsize::new(pool_size).unwrap())
+                                .await
+                                .unwrap();
                         while let Ok(Some(packet)) = packets.next_packet().await {
                             let _ = packet.data();
                         }
@@ -68,12 +72,13 @@ fn parse_pooled_with_buf_reader(c: &mut Criterion) {
             |b, &pool_size| {
                 b.to_async(tokio::runtime::Runtime::new().unwrap())
                     .iter(|| async move {
-                        let file =
-                            BufReader::new(File::open("test_data/test.pcap").await.unwrap());
-                        let mut packets =
-                            AsyncPooledPcapReader::with_buf_reader(file, pool_size)
-                                .await
-                                .unwrap();
+                        let file = BufReader::new(File::open("test_data/test.pcap").await.unwrap());
+                        let mut packets = AsyncPooledPcapReader::with_buf_reader(
+                            file,
+                            NonZeroUsize::new(pool_size).unwrap(),
+                        )
+                        .await
+                        .unwrap();
                         while let Ok(Some(packet)) = packets.next_packet().await {
                             let _ = packet.data();
                         }
@@ -95,7 +100,9 @@ fn parse_pooled_channel_roundtrip(c: &mut Criterion) {
                     .iter(|| async move {
                         let file = File::open("test_data/test.pcap").await.unwrap();
                         let mut packets =
-                            AsyncPooledPcapReader::new(file, pool_size).await.unwrap();
+                            AsyncPooledPcapReader::new(file, NonZeroUsize::new(pool_size).unwrap())
+                                .await
+                                .unwrap();
                         let (tx, mut rx) = tokio::sync::mpsc::channel(pool_size);
 
                         let producer = tokio::spawn(async move {
