@@ -2,6 +2,8 @@
 //!
 //! Source: <https://www.tcpdump.org/linktypes.html>
 use thiserror::Error;
+/// Returned when a link type value does not correspond to any known
+/// [`LinkType`] variant.
 #[derive(Debug, Error)]
 #[error("Invalid link type: {0}")]
 pub struct InvalidLinkType(pub u16);

@@ -1,3 +1,4 @@
+//! Section Header Block (SHB)
 use std::io::Read;
 
 use crate::{
@@ -17,13 +18,20 @@ define_options_enum! {
     }
 }
 
+/// Marks the start of a section in a pcap-ng file and establishes the byte
+/// order, version, and (optionally) total section length used by all
+/// subsequent blocks in the section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SectionHeaderBlock {
+    /// Total block length in bytes, including header and footer.
     pub block_length: u32,
+    /// Byte order in effect for the rest of this section.
     pub byte_order: Endianness,
+    /// pcap-ng format version declared by the section.
     pub version: Version,
     /// If negative -1 it will be treated as no section length
     pub section_length: Option<u64>,
+    /// Optional block options associated with this section header.
     pub options: Option<BlockOptions>,
 }
 impl<'b> Block<'b> for SectionHeaderBlock {

@@ -1,3 +1,4 @@
+//! Synchronous pcap-ng reader
 use std::io::Read;
 
 use crate::{
@@ -19,6 +20,7 @@ pub struct SyncPcapNgReader<R: Read> {
     ///
     /// Will reset each time a new section header block is read
     interfaces: Vec<InterfaceDescriptionBlock>,
+    /// Reusable scratch buffer for packet contents.
     buffer: Vec<u8>,
 }
 impl<R: Read> SyncPcapNgReader<R> {
@@ -52,7 +54,8 @@ impl<R: Read> SyncPcapNgReader<R> {
     }
     /// Returns the version of the pcap-ng file
     ///
-    /// This is obtained from the current section header block which isn't explicitly stated will never change throughout the file
+    /// Taken from the current section header block; this may change if a new
+    /// section header is encountered while reading.
     pub fn version(&self) -> &Version {
         &self.current_section.version
     }
@@ -61,6 +64,10 @@ impl<R: Read> SyncPcapNgReader<R> {
     pub fn interfaces(&self) -> &[InterfaceDescriptionBlock] {
         &self.interfaces
     }
+    /// Reads the next pcap-ng block, transparently tracking section headers
+    /// and interface description blocks as they pass.
+    ///
+    /// Returns `Ok(None)` at end of file.
     pub fn next_block(&mut self) -> Result<Option<PcapNgBlock<'_>>, PcapNgParseError> {
         let mut header_bytes = [0u8; 8];
         match self.reader.read_exact(&mut header_bytes) {

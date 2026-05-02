@@ -1,3 +1,4 @@
+//! Pcap writer for non-seekable targets (e.g. stdout, sockets)
 use std::io::{self, Write};
 
 use crate::pcap::{
@@ -13,11 +14,18 @@ pub struct SeeklessPcapWriter<W: Write> {
 }
 
 impl<W: Write> SeeklessPcapWriter<W> {
+    /// Creates a new writer and immediately writes the file header to
+    /// `target`.
     pub fn new(mut target: W, header: PcapFileHeader) -> Result<Self, io::Error> {
         header.write(&mut target)?;
         Ok(Self { target, header })
     }
 
+    /// Writes a packet to the target.
+    ///
+    /// Returns an [`io::ErrorKind::InvalidInput`] error if `content.len()`
+    /// exceeds the configured `snap_length`, since the file header is fixed
+    /// and cannot be rewritten on a non-seekable target.
     pub fn write_header(
         &mut self,
         header: NewPacketHeader,
@@ -43,6 +51,7 @@ impl<W: Write> SeeklessPcapWriter<W> {
         self.target.write_all(content)?;
         Ok(())
     }
+    /// Flushes the target writer.
     pub fn finish(mut self) -> Result<(), io::Error> {
         self.target.flush()?;
         Ok(())

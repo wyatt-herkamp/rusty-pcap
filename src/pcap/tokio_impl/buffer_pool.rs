@@ -172,8 +172,8 @@ impl BufferPoolInner {
 /// Buffers are pre-allocated to a fixed size. When a [`PooledPacket`] is dropped,
 /// its buffer is returned to the pool automatically via a single atomic CAS.
 ///
-/// If all buffers are in use, [`BufferPool::acquire`] will await until
-/// a buffer becomes available.
+/// If all buffers are in use, acquiring a new one will await until a buffer
+/// becomes available.
 #[derive(Clone)]
 pub struct BufferPool {
     inner: Arc<BufferPoolInner>,

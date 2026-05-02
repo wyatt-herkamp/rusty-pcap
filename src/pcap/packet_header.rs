@@ -37,6 +37,9 @@ mod _chrono_impl {
 
     use super::PacketTimestamp;
     impl PacketTimestamp {
+        /// Converts this timestamp into a [`NaiveDateTime`], interpreting
+        /// `usec` according to the file's `MagicNumber` resolution
+        /// (microseconds vs nanoseconds).
         pub fn to_chrono_naive_datetime(&self, resolution: MagicNumber) -> Option<NaiveDateTime> {
             match resolution {
                 MagicNumber::Microsecond => {
@@ -52,6 +55,7 @@ mod _chrono_impl {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PacketHeader {
+    /// Capture timestamp for this packet.
     pub timestamp: PacketTimestamp,
     /// The length of the packet data included in the file
     pub include_len: u32,
@@ -60,6 +64,7 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
+    /// Constructs a new packet header from its components.
     pub fn new(timestamp: PacketTimestamp, incl_len: u32, orig_len: u32) -> Self {
         Self {
             timestamp,
@@ -68,9 +73,11 @@ impl PacketHeader {
         }
     }
     /// Reads the packet header from the reader
-    /// Returns `Ok(Self)` on success, or `Err` if there was an error
-    /// reading the packet header
-    /// The endianness is used to determine how to read the bytes
+    ///
+    /// Returns `Ok(Self)` on success, or `Err` if there was an error reading
+    /// the packet header. `endianness` controls byte order, and `version`
+    /// determines field order (pre-2.3 stores `orig_len` before
+    /// `include_len`).
     #[inline(always)]
     pub fn read<R: Read>(
         reader: &mut R,
@@ -81,6 +88,10 @@ impl PacketHeader {
         reader.read_exact(&mut header)?;
         Self::parse_bytes(&header, endianness, version)
     }
+    /// Parses a packet header from its raw 16 bytes
+    ///
+    /// `endianness` controls byte order, and `version` determines field order
+    /// (pre-2.3 stores `orig_len` before `include_len`).
     #[inline(always)]
     pub fn parse_bytes(
         bytes: &[u8; 16],
@@ -108,6 +119,10 @@ impl PacketHeader {
             orig_len,
         })
     }
+    /// Writes the packet header to the writer
+    ///
+    /// `endianness` controls byte order, and `version` determines field order
+    /// (pre-2.3 stores `orig_len` before `include_len`).
     pub fn write<W: Write>(
         &self,
         writer: &mut W,

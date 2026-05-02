@@ -1,3 +1,4 @@
+//! Name Resolution Block (NRB)
 use std::io::Read;
 
 use crate::{
@@ -9,15 +10,24 @@ use crate::{
         pad_length_to_32_bytes,
     },
 };
+/// A single name resolution record (e.g. IPv4-to-name, IPv6-to-name).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
+    /// Record type identifier (`nrb_record_type`).
     pub record_type: u16,
+    /// Length in bytes of `record_data` (without padding).
     pub record_length: u16,
+    /// Raw record bytes; interpretation depends on `record_type`.
     pub record_data: Vec<u8>,
 }
+/// Wrapper around the list of resolution records contained in a Name
+/// Resolution Block.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Records(pub Vec<Record>);
 impl Records {
+    /// Reads records from `reader` until an end-of-records marker (length 0)
+    /// is encountered, returning the parsed [`Records`] together with the
+    /// total number of bytes consumed (including padding).
     pub fn read_from_reader<R: Read, B: ByteOrder>(
         reader: &mut R,
         byte_order: B,
@@ -52,10 +62,14 @@ impl Records {
     }
 }
 
+/// Maps numeric network addresses (IPv4/IPv6) to human-readable names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameResolutionBlock {
+    /// Total block length in bytes, including header and footer.
     pub block_length: u32,
+    /// Resolution records contained in this block.
     pub records: Records,
+    /// Optional block options associated with this NRB.
     pub options: Option<BlockOptions>,
 }
 impl<'b> Block<'b> for NameResolutionBlock {

@@ -49,6 +49,11 @@ impl<R: Read> SyncPcapReader<R> {
     pub fn version(&self) -> &Version {
         &self.file_header.version
     }
+    /// Reads the next packet from the pcap file
+    ///
+    /// Returns `Ok(None)` when end-of-file is reached and `Ok(Some((header,
+    /// data)))` for each successfully read packet. The returned slice borrows
+    /// from the reader's internal buffer and is valid until the next call.
     pub fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapParseError> {
         if let Err(err) = self.reader.read_exact(&mut self.header_buffer) {
             if err.kind() == std::io::ErrorKind::UnexpectedEof {

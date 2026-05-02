@@ -84,6 +84,7 @@ impl StandardOptions {
         )
     }
 }
+/// A single TLV option attached to a pcap-ng block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockOption {
     /// Option code
@@ -97,10 +98,14 @@ pub struct BlockOption {
     /// The value of the option
     pub value: Vec<u8>,
 }
+/// Errors returned by [`BlockOption::new`] when a PEN is supplied
+/// inconsistently with the option code.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum InvalidOption {
+    /// A custom option code was used without supplying a PEN.
     #[error("Custom option requires a Private Enterprise Number (PEN)")]
     CustomRequiresPen,
+    /// A PEN was supplied for an option code that is not custom.
     #[error(
         "Option code {0} is not a custom option, but a Private Enterprise Number (PEN) was provided"
     )]
@@ -134,14 +139,19 @@ impl BlockOption {
         };
         Ok(result)
     }
+    /// Returns the number of padding bytes required to align the option to
+    /// a 4-byte (32-bit) boundary.
     pub fn padding_length(&self) -> usize {
         pad_length_to_32_bytes(self.length as usize) - self.length as usize
     }
 }
+/// Errors returned while parsing a block's options list.
 #[derive(Debug, Error)]
 pub enum OptionParseError {
+    /// An underlying I/O error occurred.
     #[error(transparent)]
     IO(#[from] std::io::Error),
+    /// A fixed-size field had the wrong number of bytes.
     #[error(transparent)]
     UnexpectedSize(#[from] crate::byte_order::UnexpectedSize),
 }
@@ -169,6 +179,8 @@ impl BlockOptions {
         Ok(Some((option_code, option_length, pen)))
     }
 
+    /// Reads options from `reader` and appends them to `self` until the
+    /// end-of-options marker is encountered.
     pub fn read_in<R: Read, B: ByteOrder>(
         &mut self,
         reader: &mut R,
@@ -191,6 +203,7 @@ impl BlockOptions {
         }
         Ok(())
     }
+    /// Reads a complete options list from `reader`.
     pub fn read<R: Read, B: ByteOrder>(
         reader: &mut R,
         byte_order: B,
@@ -200,6 +213,8 @@ impl BlockOptions {
         Ok(options)
     }
 
+    /// Reads an options list and returns `None` if it was empty (no
+    /// end-of-options marker was needed).
     pub fn read_option<R: Read, B: ByteOrder>(
         reader: &mut R,
         byte_order: B,
@@ -212,6 +227,8 @@ impl BlockOptions {
         Ok(Some(options))
     }
 
+    /// Writes all options to `writer`, including padding and the
+    /// end-of-options marker.
     pub fn write<W: Write>(
         &self,
         writer: &mut W,
@@ -269,6 +286,7 @@ mod tokio_async {
             Ok(Some((option_code, option_length, pen)))
         }
 
+        /// Async counterpart to [`BlockOptions::read_in`].
         pub async fn read_async_in<R: AsyncRead + Unpin, B: ByteOrder>(
             &mut self,
             reader: &mut R,
@@ -295,6 +313,7 @@ mod tokio_async {
             }
             Ok(())
         }
+        /// Async counterpart to [`BlockOptions::read`].
         pub async fn read_async<R: AsyncRead + Unpin, B: ByteOrder>(
             reader: &mut R,
             byte_order: B,

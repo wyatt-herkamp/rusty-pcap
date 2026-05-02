@@ -1,3 +1,4 @@
+//! Enhanced Packet Block (EPB)
 use std::io::{Cursor, Read, Write};
 
 use crate::{
@@ -10,22 +11,34 @@ use crate::{
     },
 };
 
+/// A pcap-ng Enhanced Packet Block (EPB).
+///
+/// Captures a packet observed on a specific interface together with its
+/// timestamp, captured/original lengths, and optional block options.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnhancedPacket<'b> {
+    /// Total block length in bytes, including header and footer.
     pub block_length: u32,
+    /// Identifier of the interface this packet was captured on.
     // 8..12
     pub interface_id: u32,
+    /// Upper 32 bits of the packet timestamp.
     // 12..16
     pub timestamp_high: u32,
+    /// Lower 32 bits of the packet timestamp.
     // 16..20
     pub timestamp_low: u32,
+    /// Number of bytes captured (may be less than `original_length`).
     // 20..24
     pub captured_length: u32,
+    /// Length of the packet on the wire.
     // 24..28
     pub original_length: u32,
 
+    /// Captured packet bytes, borrowed from the reader's packet buffer.
     pub content: &'b [u8],
 
+    /// Optional block options associated with this packet.
     pub options: Option<BlockOptions>,
 }
 impl<'b> EnhancedPacket<'b> {

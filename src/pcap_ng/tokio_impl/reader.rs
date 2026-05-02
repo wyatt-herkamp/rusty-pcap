@@ -29,10 +29,11 @@ pub struct AsyncPcapNgReader<R: AsyncRead + Unpin> {
     ///
     /// Will reset each time a new section header block is read
     interfaces: Vec<InterfaceDescriptionBlock>,
+    /// Reusable scratch buffer for packet contents.
     buffer: Vec<u8>,
 }
 impl<R: AsyncRead + Unpin> AsyncPcapNgReader<R> {
-    /// Creates a new `SyncPcapReader` from a reader
+    /// Creates a new `AsyncPcapNgReader` from a reader
     /// Returns `Ok(Self)` on success, or `Err` if there was an error
     /// reading the file header
     ///
@@ -66,7 +67,8 @@ impl<R: AsyncRead + Unpin> AsyncPcapNgReader<R> {
     }
     /// Returns the version of the pcap-ng file
     ///
-    /// This is obtained from the current section header block which isn't explicitly stated will never change throughout the file
+    /// Taken from the current section header block; this may change if a new
+    /// section header is encountered while reading.
     pub fn version(&self) -> &Version {
         &self.current_section.version
     }

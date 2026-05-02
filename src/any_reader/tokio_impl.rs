@@ -77,7 +77,7 @@ impl<R: AsyncRead + Unpin> AsyncAnyPcapReaderInner<R> {
 /// When the only requirement is to read packets from either pcap or pcapng files,
 /// and you do not need to access file-specific metadata or features.
 ///
-/// # How is is the the file type determined?
+/// # How is the file type determined?
 ///
 /// The file type is determined by reading the first four bytes (magic number)
 /// of the file. If the magic number matches the pcap format, a pcap reader
@@ -88,7 +88,7 @@ pub struct AsyncAnyPcapReader<R: AsyncRead + Unpin> {
     inner: AsyncAnyPcapReaderInner<R>,
 }
 impl<R: AsyncRead + Unpin> AsyncAnyPcapReader<R> {
-    /// Creates a new `SyncAnyPcapReader` from a reader
+    /// Creates a new `AsyncAnyPcapReader` from a reader
     ///
     /// A Buffered Reader should not be passed into this function as we will internally create one
     pub async fn new(reader: R) -> Result<Self, AnyPcapReaderError> {

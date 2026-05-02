@@ -53,8 +53,9 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
     /// Returns `Ok(Self)` on success, or `Err` if there was an error
     /// reading the file header
     ///
-    /// No ReadBuffer is created and the reader is not wrapped in a `BufReader`.
-    /// This is useful if the caller wants to manage their own buffer and does not want the overhead of a `BufReader`
+    /// The reader is not wrapped in a `BufReader`. A packet buffer sized to
+    /// `snap_length` is still allocated so packet bytes can be returned by
+    /// reference from [`Self::next_packet`].
     pub async fn new_without_buffer(mut reader: R) -> Result<Self, PcapParseError> {
         let mut file_header = [0u8; 24];
         reader.read_exact(&mut file_header).await?;
@@ -86,8 +87,10 @@ impl<R: AsyncRead + Unpin> AsyncPcapReader<R> {
         &self.file_header.version
     }
     /// Reads the next packet from the pcap file
-    /// Returns `Ok(None)` if there are no more packets to read
-    /// Returns `Err` if there was an error reading the packet
+    ///
+    /// Returns `Ok(None)` when end-of-file is reached and `Ok(Some((header,
+    /// data)))` for each successfully read packet. The returned slice borrows
+    /// from the reader's internal buffer and is valid until the next call.
     pub async fn next_packet(&mut self) -> Result<Option<(PacketHeader, &[u8])>, PcapParseError> {
         if let Err(err) = self.reader.read_exact(&mut self.header_buffer).await {
             if err.kind() == std::io::ErrorKind::UnexpectedEof {

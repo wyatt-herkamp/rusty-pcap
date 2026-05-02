@@ -1,3 +1,4 @@
+//! Simple Packet Block (SPB)
 use std::io::Read;
 
 use crate::{
@@ -9,10 +10,18 @@ use crate::{
     },
 };
 
+/// A pcap-ng Simple Packet Block (SPB).
+///
+/// A minimal packet record carrying only the original wire length and the
+/// captured bytes; intended for capture pipelines that don't need
+/// per-interface metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimplePacket<'b> {
+    /// Total block length in bytes, including header and footer.
     pub block_length: u32,
+    /// Length of the packet on the wire.
     pub original_length: u32,
+    /// Captured packet bytes, borrowed from the reader's packet buffer.
     pub content: &'b [u8],
 }
 impl<'b> Block<'b> for SimplePacket<'b> {

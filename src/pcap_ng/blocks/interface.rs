@@ -1,3 +1,4 @@
+//! Interface Description Block (IDB)
 use std::io::{Cursor, Read};
 
 use crate::{
@@ -34,12 +35,21 @@ define_options_enum! {
     }
 }
 
+/// Describes a single capture interface within a section.
+///
+/// Subsequent Enhanced Packet Blocks reference an interface by its index in
+/// the order in which IDBs appear in the section.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceDescriptionBlock {
+    /// Total block length in bytes, including header and footer.
     pub block_length: u32,
+    /// Link layer type used by this interface.
     pub link_type: LinkType,
+    /// Reserved bytes from the IDB layout; preserved verbatim.
     pub reserved: [u8; 2],
+    /// Maximum number of bytes captured per packet on this interface.
     pub snap_length: u32,
+    /// Optional block options for this interface (name, description, etc.).
     pub options: Option<BlockOptions>,
 }
 impl<'b> Block<'b> for InterfaceDescriptionBlock {

@@ -1,3 +1,4 @@
+//! Synchronous pcap writer
 use std::io::{self, Seek, Write};
 pub mod seekless;
 use crate::pcap::{
@@ -5,8 +6,13 @@ use crate::pcap::{
     packet_header::{PacketHeader, PacketTimestamp},
 };
 
+/// Header data supplied by callers when writing a new packet.
+///
+/// `include_len` is taken from the content slice; only the timestamp and
+/// optional `orig_len` need to be provided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct NewPacketHeader {
+    /// Capture timestamp for this packet.
     pub timestamp: PacketTimestamp,
     /// The original length of the packet data
     pub orig_len: Option<u32>,
@@ -26,6 +32,8 @@ pub struct SyncPcapWriter<W: Write + Seek> {
 }
 
 impl<W: Write + Seek> SyncPcapWriter<W> {
+    /// Creates a new writer and immediately writes the file header to
+    /// `target`.
     pub fn new(mut target: W, header: PcapFileHeader) -> Result<Self, io::Error> {
         header.write(&mut target)?;
         Ok(Self {
@@ -35,6 +43,11 @@ impl<W: Write + Seek> SyncPcapWriter<W> {
         })
     }
 
+    /// Writes a packet to the target.
+    ///
+    /// If `content.len()` exceeds the file header's `snap_length`, the
+    /// header's snap length is updated in memory and a rewrite is queued for
+    /// [`Self::finish`] / [`Self::update_snap_length`].
     pub fn write_header(
         &mut self,
         header: NewPacketHeader,
@@ -59,6 +72,8 @@ impl<W: Write + Seek> SyncPcapWriter<W> {
         Ok(())
     }
 
+    /// Flushes the target and rewrites the file header if any packet exceeded
+    /// the original snap length.
     pub fn finish(mut self) -> Result<(), io::Error> {
         self.target.flush()?;
         self.update_snap_length()?;

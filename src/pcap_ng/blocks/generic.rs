@@ -1,3 +1,4 @@
+//! Generic block fallback for unknown block types
 use std::io::Read;
 
 use crate::{
@@ -17,6 +18,8 @@ pub struct GenericBlock {
     pub data: Option<Vec<u8>>,
 }
 impl GenericBlock {
+    /// Constructs a new generic block, automatically computing
+    /// `block_length` from the data payload size.
     pub fn new(block_id: u32, data: Option<Vec<u8>>) -> Self {
         let mut block_length = 12; // Minimum size for a block header
         if let Some(ref data) = data {
@@ -28,6 +31,7 @@ impl GenericBlock {
             data,
         }
     }
+    /// Reads a generic block whose 8-byte header has already been consumed.
     pub fn read_with_header<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
@@ -49,6 +53,7 @@ impl GenericBlock {
             data,
         })
     }
+    /// Reads the entire generic block, including its 8-byte header.
     pub fn read<R: Read>(reader: &mut R, byte_order: Endianness) -> Result<Self, PcapNgParseError> {
         let header = BlockHeader::read(reader)?;
         Self::read_with_header(reader, &header, byte_order)
@@ -68,6 +73,7 @@ mod tokio_async {
     };
 
     impl GenericBlock {
+        /// Async counterpart to [`GenericBlock::read_with_header`].
         pub async fn read_async_with_header<R: AsyncRead + Unpin>(
             reader: &mut R,
             header: &BlockHeader,

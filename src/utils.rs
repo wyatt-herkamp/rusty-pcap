@@ -1,5 +1,5 @@
 use std::io::Read;
-/// A reader that allows peaking into the first N bytes without consuming them
+/// A reader that allows peeking into the first N bytes without consuming them
 pub struct PeakableReader<R: Read> {
     inner: R,
     peeked: Option<Vec<u8>>,
@@ -46,7 +46,7 @@ pub mod tokio_impl {
 
     use tokio::io::{AsyncRead, AsyncReadExt as _, ReadBuf};
 
-    /// A reader that allows peaking into the first N bytes without consuming them
+    /// A reader that allows peeking into the first N bytes without consuming them
     pub struct AsyncPeakableReader<R: AsyncRead + Unpin> {
         inner: R,
         peeked: Option<Vec<u8>>,

@@ -16,14 +16,20 @@ mod tokio_impl;
 #[cfg(feature = "tokio-async")]
 pub use tokio_impl::AsyncAnyPcapReader;
 
+/// Errors returned by [`SyncAnyPcapReader`] (and the async counterpart) when
+/// detecting and reading either a pcap or pcap-ng file.
 #[derive(Debug, Error)]
 pub enum AnyPcapReaderError {
+    /// The file's magic number did not match either pcap or pcap-ng.
     #[error("Invalid pcap format")]
     InvalidPcapFormat,
+    /// An error occurred while parsing the file as pcap.
     #[error(transparent)]
     PcapError(#[from] PcapParseError),
+    /// An error occurred while parsing the file as pcap-ng.
     #[error(transparent)]
     PcapNgError(#[from] PcapNgParseError),
+    /// An underlying I/O error occurred.
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 }
@@ -76,6 +82,9 @@ impl<R: Read> SyncAnyPcapReaderInner<R> {
         }
     }
 }
+/// A packet returned by [`SyncAnyPcapReader::next_packet`]: a header that
+/// preserves whether the source was pcap or pcap-ng, paired with the raw
+/// packet bytes.
 pub type AnyPcapPacket<'a> = (AnyPacketHeader, &'a [u8]);
 /// A reader that can read both pcap and pcapng files
 ///
@@ -84,7 +93,7 @@ pub type AnyPcapPacket<'a> = (AnyPacketHeader, &'a [u8]);
 /// When the only requirement is to read packets from either pcap or pcapng files,
 /// and you do not need to access file-specific metadata or features.
 ///
-/// # How is is the the file type determined?
+/// # How is the file type determined?
 ///
 /// The file type is determined by reading the first four bytes (magic number)
 /// of the file. If the magic number matches the pcap format, a pcap reader

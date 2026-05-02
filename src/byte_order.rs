@@ -3,6 +3,8 @@
 use std::io::{Read, Write};
 
 use thiserror::Error;
+/// Returned when the byte order of a pcap or pcap-ng file cannot be determined
+/// from its magic number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("Undetermined byte order")]
 pub struct UndertminedByteOrder;
@@ -10,13 +12,17 @@ pub struct UndertminedByteOrder;
 pub trait ByteOrder: Clone + Copy {
     /// Converts a byte array to a u16
     fn u16_from_bytes(self, bytes: [u8; 2]) -> u16;
+    /// Converts a u16 to a byte array
     fn u16_to_bytes(self, value: u16) -> [u8; 2];
     /// Converts a byte array to a u32
     fn u32_from_bytes(self, bytes: [u8; 4]) -> u32;
+    /// Converts a u32 to a byte array
     fn u32_to_bytes(self, value: u32) -> [u8; 4];
+    /// Converts a byte array to a u64
     fn u64_from_bytes(self, bytes: [u8; 8]) -> u64;
 }
 
+/// Big-endian byte order
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BigEndian;
 impl ByteOrder for BigEndian {
@@ -41,6 +47,7 @@ impl ByteOrder for BigEndian {
         u64::from_be_bytes(bytes)
     }
 }
+/// Little-endian byte order
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LittleEndian;
 impl ByteOrder for LittleEndian {
@@ -70,7 +77,8 @@ impl ByteOrder for LittleEndian {
 ///
 /// ## Note
 ///
-/// Default is based on the system. SO using default should not be used in tests
+/// `Default` is based on the host architecture, so it should not be relied on
+/// in tests — specify [`BigEndian`] or [`LittleEndian`] explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Endianness {
     /// Little-endian byte order
@@ -131,11 +139,16 @@ impl ByteOrder for Endianness {
     }
 }
 
+/// Returned when a slice of bytes does not match the expected size for the
+/// integer type being parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("Unexpected Size for {name}: expected {expected}, got {got}")]
 pub struct UnexpectedSize {
+    /// Name of the value being parsed (e.g. `"u16"`)
     pub name: &'static str,
+    /// Number of bytes that were expected
     pub expected: usize,
+    /// Number of bytes that were actually received
     pub got: usize,
 }
 pub(crate) trait ExtendedByteOrder: ByteOrder {
@@ -170,6 +183,7 @@ impl<B: ByteOrder> ExtendedByteOrder for B {
         Ok(self.u32_from_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 }
+/// Extension trait for [`Read`] adding byte-order-aware integer reads.
 pub trait ReadExt {
     /// Reads a u16 from the reader
     fn read_u16<B: ByteOrder>(&mut self, byte_order: B) -> Result<u16, std::io::Error>;
@@ -200,10 +214,12 @@ impl<R: Read> ReadExt for R {
     }
 }
 
+/// Extension trait for [`Write`] adding byte-order-aware integer writes.
 pub trait WriteExt {
-    /// Reads a u16 from the reader
+    /// Writes a u16 to the writer
     fn write_u16<B: ByteOrder>(&mut self, value: u16, byte_order: B) -> Result<(), std::io::Error>;
 
+    /// Writes a u32 to the writer
     fn write_u32<B: ByteOrder>(&mut self, value: u32, byte_order: B) -> Result<(), std::io::Error>;
 }
 impl<R: Write> WriteExt for R {
@@ -219,12 +235,14 @@ impl<R: Write> WriteExt for R {
     }
 }
 
+/// Async byte-order utilities, gated on the `tokio-async` feature.
 #[cfg(feature = "tokio-async")]
 pub mod tokio_async {
     use tokio::io::{AsyncRead, AsyncReadExt as _};
 
     use crate::byte_order::ByteOrder;
 
+    /// Async counterpart to [`super::ReadExt`] for [`AsyncRead`] types.
     pub trait AsyncReadExt {
         /// Reads a u16 from the reader
         fn read_u16<B: ByteOrder>(

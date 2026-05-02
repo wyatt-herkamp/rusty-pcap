@@ -19,6 +19,10 @@ pub use header::{SHBOptionCodes, SectionHeaderBlock};
 pub use interface::{InterfaceDescriptionBlock, InterfaceOptionCodes};
 pub use name_resolution::NameResolutionBlock;
 pub use simple_packet::SimplePacket;
+/// Common interface for pcap-ng block types.
+///
+/// Each implementor exposes its 4-byte block ID and knows how to parse itself
+/// from a [`BlockHeader`] plus a content stream.
 pub trait Block<'b> {
     /// Returns the block ID for this block type
     fn block_id() -> u32
@@ -60,6 +64,9 @@ pub trait Block<'b> {
     where
         Self: Sized + 'b;
 
+    /// Like [`read_with_header`](Self::read_with_header) but assumes the
+    /// caller has already validated `header.block_id` and resolved the byte
+    /// order. Implementors may override this to skip redundant checks.
     fn read_with_header_no_block_check<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
@@ -118,6 +125,8 @@ mod tokio_block {
         }
     }
     impl<'b> PcapNgBlock<'b> {
+        /// Async counterpart to [`PcapNgBlock::read`]: dispatches on the
+        /// block ID and reads the appropriate variant from `reader`.
         pub async fn read_async<R: AsyncRead + Unpin>(
             reader: &mut R,
             header: &BlockHeader,
@@ -180,12 +189,20 @@ mod tokio_block {
 }
 #[cfg(feature = "tokio-async")]
 pub use tokio_block::TokioAsyncBlock;
+/// The fixed 8-byte header that prefixes every pcap-ng block.
+///
+/// Stores the raw bytes for `block_id` and `block_length`; use
+/// [`Self::block_id_as_u32`] / [`Self::block_length_as_u32`] to decode them
+/// for a given byte order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockHeader {
+    /// Raw 4-byte block type identifier.
     pub block_id: [u8; 4],
+    /// Raw 4-byte total block length (including header and footer).
     pub block_length: [u8; 4],
 }
 impl BlockHeader {
+    /// Constructs a header from already-read raw bytes.
     pub fn new(block_id: [u8; 4], block_length: [u8; 4]) -> Self {
         Self {
             block_id,
@@ -200,11 +217,13 @@ impl BlockHeader {
     pub fn block_length_as_u32(&self, endianness: impl ByteOrder) -> u32 {
         endianness.u32_from_bytes(self.block_length)
     }
+    /// Reads the 8-byte block header from the reader.
     pub fn read<R: Read>(reader: &mut R) -> Result<Self, PcapNgParseError> {
         let block_id = reader.read_bytes::<4>()?;
         let block_length = reader.read_bytes::<4>()?;
         Ok(Self::new(block_id, block_length))
     }
+    /// Parses a block header from a slice that must contain at least 8 bytes.
     pub fn parse_from_bytes(bytes: &[u8]) -> Result<Self, PcapNgParseError> {
         if bytes.len() < 8 {
             return Err(PcapNgParseError::UnexpectedSize(UnexpectedSize {
@@ -244,22 +263,33 @@ impl BlockHeader {
             None
         }
     }
+    /// Writes the 8-byte block header to the writer.
     pub fn write<W: Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         writer.write_all(&self.block_id)?;
         writer.write_all(&self.block_length)?;
         Ok(())
     }
 }
+/// One of the recognized pcap-ng block types, plus a fallback for any block
+/// type the library does not parse natively.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PcapNgBlock<'b> {
+    /// Section Header Block (SHB).
     SectionHeader(SectionHeaderBlock),
+    /// Interface Description Block (IDB).
     InterfaceDescription(InterfaceDescriptionBlock),
+    /// Simple Packet Block (SPB).
     SimplePacket(SimplePacket<'b>),
+    /// Enhanced Packet Block (EPB).
     EnhancedPacket(EnhancedPacket<'b>),
+    /// Name Resolution Block (NRB).
     NameResolution(NameResolutionBlock),
+    /// Any block type not specifically modeled, retained as raw bytes.
     Generic(GenericBlock),
 }
 impl<'b> PcapNgBlock<'b> {
+    /// Reads the block whose `header` has already been parsed, dispatching
+    /// to the appropriate variant by block ID.
     pub fn read<R: Read>(
         reader: &mut R,
         header: &BlockHeader,
