@@ -4,13 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.6.0] (Unreleased)
+## [0.6.0] (2026-05-02)
 - Encourage Proper Size Buffer Usage inside async pcap reader
   - `AsyncPcapReader::new` will now create a BufReader and return `AsyncPcapReader<BufReader<R>>`
   - `AsyncPcapReader::with_buf_reader` uses a predefined BufReader and returns `AsyncPcapReader<BufReader<R>>`
   - `AsyncPcapReader::new_without_buffer` is used when no buffer is desired and returns `AsyncPcapReader<R>`
 - Added Async Benchmarking
 - Added a pooled async pcap reader
+
 ## [0.5.0] (2026-01-30)
 - Added AnyPcapReader to read both pcap and pcapng files
 - Introduce AsyncPcapNgReader for asynchronous pcapng reading
@@ -41,3 +42,5 @@ Initial release.
 [0.2.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.2.0
 [0.3.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.3.0
 [0.4.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.4.0
+[0.5.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.5.0
+[0.6.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.6.0
