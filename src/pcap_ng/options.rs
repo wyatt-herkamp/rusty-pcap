@@ -372,8 +372,7 @@ mod tokio_async {
             byte_order: B,
         ) -> Result<(), OptionParseError> {
             loop {
-                let option_code =
-                    <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
+                let option_code = <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
                 let option_length =
                     <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
                 if option_code == 0 && option_length == 0 {

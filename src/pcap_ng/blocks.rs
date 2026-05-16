@@ -6,17 +6,25 @@ use crate::{
     pcap_ng::PcapNgParseError,
 };
 
+mod custom;
+mod decryption_secrets;
 mod enhanced_packet;
 mod generic;
 mod header;
 mod interface;
+mod interface_statistics;
 mod name_resolution;
 mod simple_packet;
+pub use custom::{
+    CUSTOM_BLOCK_COPYABLE, CUSTOM_BLOCK_DO_NOT_COPY, CustomBlock, is_custom_block_id,
+};
+pub use decryption_secrets::DecryptionSecretsBlock;
 pub use enhanced_packet::EnhancedPacket;
 
 pub use generic::GenericBlock;
 pub use header::{SHBOptionCodes, SectionHeaderBlock};
 pub use interface::{InterfaceDescriptionBlock, InterfaceOptionCodes};
+pub use interface_statistics::{ISBOptionCodes, InterfaceStatisticsBlock};
 pub use name_resolution::NameResolutionBlock;
 pub use simple_packet::SimplePacket;
 /// Common interface for pcap-ng block types.
@@ -89,7 +97,8 @@ mod tokio_block {
         pcap_ng::{
             PcapNgParseError,
             blocks::{
-                Block, BlockHeader, EnhancedPacket, GenericBlock, InterfaceDescriptionBlock,
+                Block, BlockHeader, CustomBlock, DecryptionSecretsBlock, EnhancedPacket,
+                GenericBlock, InterfaceDescriptionBlock, InterfaceStatisticsBlock,
                 NameResolutionBlock, PcapNgBlock, SectionHeaderBlock, SimplePacket,
             },
         },
@@ -179,6 +188,28 @@ mod tokio_block {
                         packet_buffer,
                     )
                     .await?,
+                )),
+                5 => Ok(PcapNgBlock::InterfaceStatistics(
+                    InterfaceStatisticsBlock::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
+                )),
+                0x0000_000A => Ok(PcapNgBlock::DecryptionSecrets(
+                    DecryptionSecretsBlock::async_read_with_header(
+                        reader,
+                        header,
+                        Some(byte_order),
+                        packet_buffer,
+                    )
+                    .await?,
+                )),
+                id if super::custom::is_custom_block_id(id) => Ok(PcapNgBlock::Custom(
+                    CustomBlock::async_read_with_header_no_block_check(reader, header, byte_order)
+                        .await?,
                 )),
                 _ => Ok(PcapNgBlock::Generic(
                     GenericBlock::read_async_with_header(reader, header, byte_order).await?,
@@ -284,6 +315,12 @@ pub enum PcapNgBlock<'b> {
     EnhancedPacket(EnhancedPacket<'b>),
     /// Name Resolution Block (NRB).
     NameResolution(NameResolutionBlock),
+    /// Interface Statistics Block (ISB).
+    InterfaceStatistics(InterfaceStatisticsBlock),
+    /// Custom Block (CB / DCB) — `block.block_id` distinguishes the two flavors.
+    Custom(CustomBlock),
+    /// Decryption Secrets Block (DSB).
+    DecryptionSecrets(DecryptionSecretsBlock),
     /// Any block type not specifically modeled, retained as raw bytes.
     Generic(GenericBlock),
 }
@@ -338,6 +375,25 @@ impl<'b> PcapNgBlock<'b> {
                     Some(byte_order),
                     packet_buffer,
                 )?,
+            )),
+            5 => Ok(PcapNgBlock::InterfaceStatistics(
+                InterfaceStatisticsBlock::read_with_header(
+                    reader,
+                    header,
+                    Some(byte_order),
+                    packet_buffer,
+                )?,
+            )),
+            0x0000_000A => Ok(PcapNgBlock::DecryptionSecrets(
+                DecryptionSecretsBlock::read_with_header(
+                    reader,
+                    header,
+                    Some(byte_order),
+                    packet_buffer,
+                )?,
+            )),
+            id if custom::is_custom_block_id(id) => Ok(PcapNgBlock::Custom(
+                CustomBlock::read_with_header_no_block_check(reader, header, byte_order)?,
             )),
 
             _ => Ok(PcapNgBlock::Generic(GenericBlock::read_with_header(

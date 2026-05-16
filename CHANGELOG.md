@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updates all dependencies to their latest versions
 - Adds testing against the pcapng-test-generator
 - Fixed Options parsing in pcapng files
+- Implement InterfaceStatisticsBlock, CustomBlock, and DecryptionSecretsBlock parsing in pcapng files
 
 ## [0.6.0] (2026-05-02)
 - Encourage Proper Size Buffer Usage inside async pcap reader
@@ -51,3 +52,4 @@ Initial release.
 [0.4.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.4.0
 [0.5.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.5.0
 [0.6.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.6.0
+[0.7.0]:https://github.com/wyatt-herkamp/rusty-pcap/releases/tag/0.7.0

@@ -141,8 +141,7 @@ mod tokio_async {
             // SHB layout: 8 (BlockHeader) + 16 (fixed) + options + 4 (trailing length)
             let options_budget = (block_length as usize).saturating_sub(8 + 16 + 4);
             let options =
-                BlockOptions::read_async_bounded_option(reader, byte_order, options_budget)
-                    .await?;
+                BlockOptions::read_async_bounded_option(reader, byte_order, options_budget).await?;
             reader.read_bytes::<4>().await?;
             let result = Self {
                 block_length,

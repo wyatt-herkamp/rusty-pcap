@@ -17,16 +17,10 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use comfy_table::{Cell, Color, ContentArrangement, Table, presets::UTF8_FULL};
-use rusty_pcap::pcap_ng::{SyncPcapNgReader, blocks::PcapNgBlock};
-
-// Block IDs from the pcapng spec for block types rusty-pcap does not parse
-// natively today; encountered via PcapNgBlock::Generic.
-// Naming follows hadrielk/pcapng-test-generator's defines.lua so the report's
-// abbreviations line up with the .txt descriptors.
-const BLOCK_ID_ISB: u32 = 0x0000_0005;
-const BLOCK_ID_CB: u32 = 0x0000_0BAD; // Custom Block, may-copy
-const BLOCK_ID_DCB: u32 = 0x4000_0BAD; // Custom Block, do-not-copy
-const BLOCK_ID_DSB: u32 = 0x0000_000A; // Decryption Secrets Block (not in this corpus)
+use rusty_pcap::pcap_ng::{
+    SyncPcapNgReader,
+    blocks::{CUSTOM_BLOCK_COPYABLE, PcapNgBlock},
+};
 
 #[derive(Copy, Clone, Debug, ValueEnum, PartialEq, Eq)]
 enum EndianArg {
@@ -303,10 +297,19 @@ fn probe(path: &Path) -> Result<Counts, String> {
                 PcapNgBlock::EnhancedPacket(_) => counts.bump_abbr("EPB"),
                 PcapNgBlock::SimplePacket(_) => counts.bump_abbr("SPB"),
                 PcapNgBlock::NameResolution(_) => counts.bump_abbr("NRB"),
-                PcapNgBlock::Generic(g) => match classify_block_id(g.block_id) {
-                    Some(abbr) => counts.bump_abbr(abbr),
-                    None => counts.bump_unknown(g.block_id),
-                },
+                PcapNgBlock::InterfaceStatistics(_) => counts.bump_abbr("ISB"),
+                PcapNgBlock::DecryptionSecrets(_) => counts.bump_abbr("DSB"),
+                PcapNgBlock::Custom(cb) => {
+                    // The test corpus distinguishes "CB" (may-copy) from "DCB"
+                    // (do-not-copy) in its descriptors, so mirror that split
+                    // here for count-comparison purposes.
+                    if cb.block_id == CUSTOM_BLOCK_COPYABLE {
+                        counts.bump_abbr("CB");
+                    } else {
+                        counts.bump_abbr("DCB");
+                    }
+                }
+                PcapNgBlock::Generic(g) => counts.bump_unknown(g.block_id),
             },
             Ok(None) => return Ok(counts),
             Err(e) => return Err(format!("{e}")),
@@ -314,18 +317,8 @@ fn probe(path: &Path) -> Result<Counts, String> {
     }
 }
 
-fn classify_block_id(id: u32) -> Option<&'static str> {
-    match id {
-        BLOCK_ID_ISB => Some("ISB"),
-        BLOCK_ID_CB => Some("CB"),
-        BLOCK_ID_DCB => Some("DCB"),
-        BLOCK_ID_DSB => Some("DSB"),
-        _ => None,
-    }
-}
-
 // Abbreviations that map onto real PcapNgBlock variants (not Generic).
-const NATIVE_ABBRS: &[&str] = &["SHB", "IDB", "EPB", "SPB", "NRB"];
+const NATIVE_ABBRS: &[&str] = &["SHB", "IDB", "EPB", "SPB", "NRB", "ISB", "CB", "DCB", "DSB"];
 
 fn is_native(abbr: &str) -> bool {
     NATIVE_ABBRS.contains(&abbr)

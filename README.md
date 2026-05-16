@@ -21,6 +21,9 @@ This library includes support for reading PCAP-NG files, however, not all block 
 - [x] Enhanced Packet Block
 - [x] Simple Packet Block
 - [x] Name Resolution Block
+- [x] Interface Statistics Block
+- [x] Custom Block
+- [x] Decryption Secrets Block
 
 No support for writing PCAP-NG files is currently available.
 

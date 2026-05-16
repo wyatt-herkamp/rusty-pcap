@@ -81,6 +81,43 @@ fn debug_print_block(block: &PcapNgBlock) {
             }
             println!("--- End of Name Resolution Block ---");
         }
+        PcapNgBlock::InterfaceStatistics(isb) => {
+            println!("--- Interface Statistics Block ---");
+            println!("Block Length: {}", isb.block_length);
+            println!("Interface ID: {}", isb.interface_id);
+            println!(
+                "Timestamp: high={} low={}",
+                isb.timestamp_high, isb.timestamp_low
+            );
+            if let Some(options) = &isb.options {
+                println!("Options: {:?}", options);
+            } else {
+                println!("No options");
+            }
+            println!("--- End of Interface Statistics Block ---");
+        }
+        PcapNgBlock::Custom(cb) => {
+            println!(
+                "--- Custom Block ({}) ---",
+                if cb.copy_allowed() { "CB" } else { "DCB" }
+            );
+            println!("Block Length: {}", cb.block_length);
+            println!("PEN: {}", cb.pen);
+            println!("Custom Data Length: {}", cb.custom_data.len());
+            println!("--- End of Custom Block ---");
+        }
+        PcapNgBlock::DecryptionSecrets(dsb) => {
+            println!("--- Decryption Secrets Block ---");
+            println!("Block Length: {}", dsb.block_length);
+            println!("Secrets Type: 0x{:08X}", dsb.secrets_type);
+            println!("Secrets Length: {}", dsb.secrets_length);
+            if let Some(options) = &dsb.options {
+                println!("Options: {:?}", options);
+            } else {
+                println!("No options");
+            }
+            println!("--- End of Decryption Secrets Block ---");
+        }
     }
 }
 
