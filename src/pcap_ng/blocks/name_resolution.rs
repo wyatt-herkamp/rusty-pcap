@@ -95,12 +95,11 @@ impl<'b> Block<'b> for NameResolutionBlock {
             .ok_or(UndertminedByteOrder)?;
         let block_length = header.block_length_as_u32(byte_order);
         let (records, bytes_read) = Records::read_from_reader(reader, byte_order)?;
-        let options_space = block_length as usize - (Self::minimum_size() + bytes_read);
-        let options = if options_space > 0 {
-            BlockOptions::read_option(reader, byte_order)?
-        } else {
-            None
-        };
+        // NRB minimum_size = 12 = 8 (BlockHeader) + 4 (trailing length).
+        let options_budget = (block_length as usize)
+            .saturating_sub(Self::minimum_size())
+            .saturating_sub(bytes_read);
+        let options = BlockOptions::read_bounded_option(reader, byte_order, options_budget)?;
         reader.read_exact(&mut [0u8; 4])?; // Read the footer (4 bytes)
         Ok(Self {
             block_length,

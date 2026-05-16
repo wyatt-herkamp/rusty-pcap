@@ -114,23 +114,27 @@ pub enum InvalidOption {
 impl BlockOption {
     /// Creates a new BlockOption
     ///
-    /// Pen can only be set if the option code is a custom option.
+    /// `pen` may only be set for custom-option codes (2988, 2989, 19372, 19373).
+    /// When `pen` is set, the wire-format option length is `4 + value.len()`
+    /// because the pcapng spec includes the PEN in the option length
+    /// (see RFC pcapng §3.5.2).
     pub fn new(
         option_code: u16,
         pen: Option<u32>,
         option_value: impl Into<Vec<u8>>,
     ) -> Result<Self, InvalidOption> {
-        if let Ok(option_code) = StandardOptions::try_from(option_code) {
-            if option_code.is_custom() && pen.is_none() {
-                return Err(InvalidOption::CustomRequiresPen);
-            } else if !option_code.is_custom() && pen.is_some() {
-                return Err(InvalidOption::UnexpectedPen(option_code as u16));
-            }
-        } else if pen.is_some() {
+        let is_custom_code = StandardOptions::try_from(option_code)
+            .map(|o| o.is_custom())
+            .unwrap_or(false);
+        if pen.is_some() && !is_custom_code {
             return Err(InvalidOption::UnexpectedPen(option_code));
         }
         let option_value = option_value.into();
-        let option_length = option_value.len() as u16;
+        let option_length = if pen.is_some() {
+            (option_value.len() + 4) as u16
+        } else {
+            option_value.len() as u16
+        };
         let result = Self {
             code: option_code,
             length: option_length,
@@ -161,49 +165,145 @@ pub enum OptionParseError {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockOptions(pub Vec<BlockOption>);
 impl BlockOptions {
-    fn read_option_header<R: Read, B: ByteOrder>(
-        reader: &mut R,
+    /// Decodes a single TLV option from `bytes`, starting at `pos`.
+    ///
+    /// Returns the parsed option and the new cursor position, or `Ok(None)`
+    /// if an end-of-options marker is encountered, the remaining bytes are
+    /// too few to hold an option header, or the option claims more bytes
+    /// than remain in the buffer. The last case is treated as "stop parsing"
+    /// rather than an error because the byte budget is bounded by the
+    /// enclosing block-length and overflows mean malformed input.
+    fn decode_one<B: ByteOrder>(
+        bytes: &[u8],
+        pos: usize,
         byte_order: B,
-    ) -> Result<Option<(u16, u16, Option<u32>)>, OptionParseError> {
-        let option_code = reader.read_u16(byte_order)?;
-        let option_length = reader.read_u16(byte_order)?;
-
-        if option_code == 0 && option_length == 0 {
-            return Ok(None); // No more options to read
+    ) -> Result<Option<(BlockOption, usize)>, OptionParseError> {
+        if bytes.len().saturating_sub(pos) < 4 {
+            return Ok(None);
         }
+        let option_code = byte_order.u16_from_bytes([bytes[pos], bytes[pos + 1]]);
+        let option_length = byte_order.u16_from_bytes([bytes[pos + 2], bytes[pos + 3]]);
+        if option_code == 0 && option_length == 0 {
+            return Ok(None);
+        }
+        let body_start = pos + 4;
+        let padded_length = pad_length_to_32_bytes(option_length as usize);
+        if body_start.saturating_add(padded_length) > bytes.len() {
+            return Ok(None);
+        }
+        let body = &bytes[body_start..body_start + padded_length];
 
-        let pen = match StandardOptions::try_from(option_code) {
-            Ok(option) if option.is_custom() => Some(reader.read_u32(byte_order)?),
-            _ => None, // Skip unknown options
+        // Per pcapng spec §3.5.2: custom-option Length includes the PEN
+        // (i.e. the first 4 bytes of the option body are the PEN). Files
+        // written by non-conformant tools may omit the PEN entirely; in
+        // those cases the first 4 value bytes get surfaced as the PEN,
+        // which is harmless for byte-alignment.
+        let is_custom = StandardOptions::try_from(option_code)
+            .map(|o| o.is_custom())
+            .unwrap_or(false);
+        let (pen, value) = if is_custom && option_length >= 4 {
+            let pen_bytes = [body[0], body[1], body[2], body[3]];
+            let pen = byte_order.u32_from_bytes(pen_bytes);
+            let mut value = body[4..option_length as usize].to_vec();
+            value.truncate(option_length as usize - 4);
+            (Some(pen), value)
+        } else {
+            let mut value = body[..option_length.min(padded_length as u16) as usize].to_vec();
+            value.truncate(option_length as usize);
+            (None, value)
         };
-        Ok(Some((option_code, option_length, pen)))
+        let opt = BlockOption {
+            code: option_code,
+            length: option_length,
+            pen,
+            value,
+        };
+        Ok(Some((opt, body_start + padded_length)))
     }
 
-    /// Reads options from `reader` and appends them to `self` until the
-    /// end-of-options marker is encountered.
+    /// Reads exactly `max_bytes` from `reader` and parses options out of
+    /// that bounded buffer.
+    ///
+    /// Stops at an end-of-options marker or when the buffer is exhausted.
+    /// Used by block readers (SHB, IDB, EPB, NRB) to ensure option parsing
+    /// can never overrun the enclosing block-length, even when files omit
+    /// the optional end-of-options marker or contain non-conformant
+    /// option encodings.
+    pub fn read_bounded<R: Read, B: ByteOrder>(
+        reader: &mut R,
+        byte_order: B,
+        max_bytes: usize,
+    ) -> Result<Self, OptionParseError> {
+        if max_bytes == 0 {
+            return Ok(Self::default());
+        }
+        let mut raw = vec![0u8; max_bytes];
+        reader.read_exact(&mut raw)?;
+        let mut options = Self::default();
+        let mut pos = 0;
+        while let Some((opt, next)) = Self::decode_one(&raw, pos, byte_order)? {
+            options.0.push(opt);
+            pos = next;
+        }
+        Ok(options)
+    }
+
+    /// Like [`read_bounded`](Self::read_bounded) but returns `None` if no
+    /// options were parsed (the bounded region was empty or contained only
+    /// an end-of-options marker).
+    pub fn read_bounded_option<R: Read, B: ByteOrder>(
+        reader: &mut R,
+        byte_order: B,
+        max_bytes: usize,
+    ) -> Result<Option<Self>, OptionParseError> {
+        let options = Self::read_bounded(reader, byte_order, max_bytes)?;
+        if options.0.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(options))
+        }
+    }
+
+    /// Reads options from `reader` until an end-of-options marker is hit.
+    ///
+    /// Prefer [`read_bounded`](Self::read_bounded) when the caller knows the
+    /// block-length: this unbounded variant will read past the current block
+    /// if the file omits the end-of-options marker.
     pub fn read_in<R: Read, B: ByteOrder>(
         &mut self,
         reader: &mut R,
         byte_order: B,
     ) -> Result<(), OptionParseError> {
-        while let Some((option_code, option_length, pen)) =
-            Self::read_option_header(reader, byte_order)?
-        {
+        loop {
+            let option_code = reader.read_u16(byte_order)?;
+            let option_length = reader.read_u16(byte_order)?;
+            if option_code == 0 && option_length == 0 {
+                return Ok(());
+            }
             let padded_length = pad_length_to_32_bytes(option_length as usize);
-            let mut option_value = vec![0u8; padded_length];
-            reader.read_exact(&mut option_value)?;
-            option_value.truncate(option_length as usize);
-
+            let mut body = vec![0u8; padded_length];
+            reader.read_exact(&mut body)?;
+            let is_custom = StandardOptions::try_from(option_code)
+                .map(|o| o.is_custom())
+                .unwrap_or(false);
+            let (pen, value) = if is_custom && option_length >= 4 {
+                let pen = byte_order.u32_from_bytes([body[0], body[1], body[2], body[3]]);
+                let mut value = body[4..option_length as usize].to_vec();
+                value.truncate(option_length as usize - 4);
+                (Some(pen), value)
+            } else {
+                body.truncate(option_length as usize);
+                (None, body)
+            };
             self.0.push(BlockOption {
                 code: option_code,
                 length: option_length,
                 pen,
-                value: option_value,
+                value,
             });
         }
-        Ok(())
     }
-    /// Reads a complete options list from `reader`.
+    /// Reads a complete options list from `reader` (unbounded).
     pub fn read<R: Read, B: ByteOrder>(
         reader: &mut R,
         byte_order: B,
@@ -213,8 +313,7 @@ impl BlockOptions {
         Ok(options)
     }
 
-    /// Reads an options list and returns `None` if it was empty (no
-    /// end-of-options marker was needed).
+    /// Reads an options list and returns `None` if it was empty (unbounded).
     pub fn read_option<R: Read, B: ByteOrder>(
         reader: &mut R,
         byte_order: B,
@@ -266,54 +365,44 @@ mod tokio_async {
     };
 
     impl BlockOptions {
-        async fn read_async_option_header<R: AsyncRead + Unpin, B: ByteOrder>(
-            reader: &mut R,
-            byte_order: B,
-        ) -> Result<Option<(u16, u16, Option<u32>)>, OptionParseError> {
-            let option_code = <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
-            let option_length = <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
-
-            if option_code == 0 && option_length == 0 {
-                return Ok(None); // No more options to read
-            }
-
-            let pen = match StandardOptions::try_from(option_code) {
-                Ok(option) if option.is_custom() => {
-                    Some(<R as InternalAsyncReadExt>::read_u32(reader, byte_order).await?)
-                }
-                _ => None, // Skip unknown options
-            };
-            Ok(Some((option_code, option_length, pen)))
-        }
-
-        /// Async counterpart to [`BlockOptions::read_in`].
+        /// Async counterpart to [`BlockOptions::read_in`] (unbounded).
         pub async fn read_async_in<R: AsyncRead + Unpin, B: ByteOrder>(
             &mut self,
             reader: &mut R,
             byte_order: B,
         ) -> Result<(), OptionParseError> {
             loop {
-                let Some((option_code, option_length, pen)) =
-                    Self::read_async_option_header(reader, byte_order).await?
-                else {
-                    break; // No more options to read
-                };
-
+                let option_code =
+                    <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
+                let option_length =
+                    <R as InternalAsyncReadExt>::read_u16(reader, byte_order).await?;
+                if option_code == 0 && option_length == 0 {
+                    return Ok(());
+                }
                 let padded_length = pad_length_to_32_bytes(option_length as usize);
-                let mut option_value = vec![0u8; padded_length];
-                reader.read_exact(&mut option_value).await?;
-                option_value.truncate(option_length as usize);
-
+                let mut body = vec![0u8; padded_length];
+                reader.read_exact(&mut body).await?;
+                let is_custom = StandardOptions::try_from(option_code)
+                    .map(|o| o.is_custom())
+                    .unwrap_or(false);
+                let (pen, value) = if is_custom && option_length >= 4 {
+                    let pen = byte_order.u32_from_bytes([body[0], body[1], body[2], body[3]]);
+                    let mut value = body[4..option_length as usize].to_vec();
+                    value.truncate(option_length as usize - 4);
+                    (Some(pen), value)
+                } else {
+                    body.truncate(option_length as usize);
+                    (None, body)
+                };
                 self.0.push(BlockOption {
                     code: option_code,
                     length: option_length,
                     pen,
-                    value: option_value,
+                    value,
                 });
             }
-            Ok(())
         }
-        /// Async counterpart to [`BlockOptions::read`].
+        /// Async counterpart to [`BlockOptions::read`] (unbounded).
         pub async fn read_async<R: AsyncRead + Unpin, B: ByteOrder>(
             reader: &mut R,
             byte_order: B,
@@ -321,6 +410,44 @@ mod tokio_async {
             let mut options = Self::default();
             options.read_async_in(reader, byte_order).await?;
             Ok(options)
+        }
+        /// Async counterpart to [`BlockOptions::read_bounded`].
+        ///
+        /// Reads exactly `max_bytes` from `reader` and parses options out of
+        /// the bounded buffer, stopping at an end-of-options marker or when
+        /// the buffer is exhausted. Mirrors the sync version's robustness
+        /// against missing end-of-options markers and non-conformant encodings.
+        pub async fn read_async_bounded<R: AsyncRead + Unpin, B: ByteOrder>(
+            reader: &mut R,
+            byte_order: B,
+            max_bytes: usize,
+        ) -> Result<Self, OptionParseError> {
+            if max_bytes == 0 {
+                return Ok(Self::default());
+            }
+            let mut raw = vec![0u8; max_bytes];
+            reader.read_exact(&mut raw).await?;
+            let mut options = Self::default();
+            let mut pos = 0;
+            while let Some((opt, next)) = Self::decode_one(&raw, pos, byte_order)? {
+                options.0.push(opt);
+                pos = next;
+            }
+            Ok(options)
+        }
+        /// Like [`read_async_bounded`](Self::read_async_bounded) but returns
+        /// `None` if no options were parsed.
+        pub async fn read_async_bounded_option<R: AsyncRead + Unpin, B: ByteOrder>(
+            reader: &mut R,
+            byte_order: B,
+            max_bytes: usize,
+        ) -> Result<Option<Self>, OptionParseError> {
+            let options = Self::read_async_bounded(reader, byte_order, max_bytes).await?;
+            if options.0.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(options))
+            }
         }
     }
 }

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.7.0] (2025-05-16)
+- Improved documentation throughout the codebase
+- Updates all dependencies to their latest versions
+- Adds testing against the pcapng-test-generator
+- Fixed Options parsing in pcapng files
+
 ## [0.6.0] (2026-05-02)
 - Encourage Proper Size Buffer Usage inside async pcap reader
   - `AsyncPcapReader::new` will now create a BufReader and return `AsyncPcapReader<BufReader<R>>`

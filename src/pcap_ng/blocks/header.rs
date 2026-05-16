@@ -74,12 +74,9 @@ impl<'b> Block<'b> for SectionHeaderBlock {
             Some(byte_order.u64_from_bytes(section_length))
         };
 
-        let options_space = block_length as usize - 24;
-        let options = if options_space > 0 {
-            BlockOptions::read_option(reader, byte_order)?
-        } else {
-            None
-        };
+        // SHB layout: 8 (BlockHeader) + 16 (fixed) + options + 4 (trailing length)
+        let options_budget = (block_length as usize).saturating_sub(8 + 16 + 4);
+        let options = BlockOptions::read_bounded_option(reader, byte_order, options_budget)?;
         reader.read_bytes::<4>()?;
         let result = Self {
             block_length,
@@ -141,12 +138,11 @@ mod tokio_async {
                 Some(byte_order.u64_from_bytes(section_length))
             };
 
-            let options_space = block_length as usize - 24;
-            let options = if options_space > 0 {
-                Some(BlockOptions::read_async(reader, byte_order).await?)
-            } else {
-                None
-            };
+            // SHB layout: 8 (BlockHeader) + 16 (fixed) + options + 4 (trailing length)
+            let options_budget = (block_length as usize).saturating_sub(8 + 16 + 4);
+            let options =
+                BlockOptions::read_async_bounded_option(reader, byte_order, options_budget)
+                    .await?;
             reader.read_bytes::<4>().await?;
             let result = Self {
                 block_length,

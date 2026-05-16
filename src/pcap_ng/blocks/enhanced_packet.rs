@@ -127,12 +127,12 @@ impl<'b> Block<'b> for EnhancedPacket<'b> {
         }
         reader.read_exact(&mut buffer[..padded_length])?;
 
-        let options_space = block_length as usize - Self::minimum_size() - padded_length;
-        let options = if options_space > 0 {
-            BlockOptions::read_option(reader, byte_order)?
-        } else {
-            None
-        };
+        // EPB minimum_size = 32 = 8 (BlockHeader) + 20 (fixed) + 4 (trailing length).
+        // Remaining for options = block_length - minimum_size - captured-payload (padded).
+        let options_budget = (block_length as usize)
+            .saturating_sub(Self::minimum_size())
+            .saturating_sub(padded_length);
+        let options = BlockOptions::read_bounded_option(reader, byte_order, options_budget)?;
         // Read the footer (4 bytes)
         reader.read_bytes::<4>()?;
         Ok(Self {

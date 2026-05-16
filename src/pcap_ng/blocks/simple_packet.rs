@@ -6,7 +6,6 @@ use crate::{
     pcap_ng::{
         PcapNgParseError,
         blocks::{Block, BlockHeader},
-        pad_length_to_32_bytes,
     },
 };
 
@@ -58,20 +57,30 @@ impl<'b> Block<'b> for SimplePacket<'b> {
     {
         let original_length = reader.read_u32(byte_order)?;
         let block_length = header.block_length_as_u32(byte_order);
-        // This might be wrong...
-        let padded_length = pad_length_to_32_bytes(original_length as usize);
-        // Ensure buffer is large enough
-        if buffer.len() < padded_length {
-            buffer.resize(padded_length, 0);
+        // The SPB carries `min(snap_length, original_length)` bytes of packet
+        // data, padded to 32 bits. The captured (possibly truncated) payload
+        // size is recoverable from the block-length alone: subtract 8 bytes
+        // of BlockHeader, 4 bytes of `original_length`, and 4 bytes of the
+        // trailing block_length footer.
+        let captured_padded = (block_length as usize).saturating_sub(16);
+        if buffer.len() < captured_padded {
+            buffer.resize(captured_padded, 0);
         }
-        reader.read_exact(&mut buffer[..padded_length])?;
+        reader.read_exact(&mut buffer[..captured_padded])?;
+
+        // If the on-wire packet fits in the captured region, expose the
+        // unpadded slice; otherwise the packet was snap-length-truncated and
+        // we keep the captured-padded slice (the last 0-3 bytes may be zero
+        // padding that cannot be distinguished from real packet data without
+        // the IDB's snap_length).
+        let content_len = captured_padded.min(original_length as usize);
 
         // Read the footer (4 bytes)
         reader.read_bytes::<4>()?;
         Ok(Self {
             block_length,
             original_length,
-            content: &buffer[..block_length as usize],
+            content: &buffer[..content_len],
         })
     }
 }

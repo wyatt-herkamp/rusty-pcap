@@ -87,13 +87,9 @@ impl<'b> Block<'b> for InterfaceDescriptionBlock {
         let snap_length = cursor.read_u32(byte_order)?;
 
         let block_length = header.block_length_as_u32(byte_order);
-        let options_space = block_length as usize - Self::minimum_size();
-
-        let options = if options_space > 0 {
-            BlockOptions::read_option(reader, byte_order)?
-        } else {
-            None
-        };
+        // IDB minimum_size = 20 = 8 (BlockHeader) + 8 (fixed) + 4 (trailing length)
+        let options_budget = (block_length as usize).saturating_sub(Self::minimum_size());
+        let options = BlockOptions::read_bounded_option(reader, byte_order, options_budget)?;
 
         reader.read_bytes::<4>()?;
         Ok(Self {
