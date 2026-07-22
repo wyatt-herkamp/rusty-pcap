@@ -1,7 +1,9 @@
 //! Lock-free buffer pool for async pcap reading with owned packet buffers.
 //!
 //! Uses a Treiber stack (lock-free atomic stack) for O(1) buffer acquire/release
-//! and a [`tokio::sync::Semaphore`] for async waiting when the pool is empty.
+//! and a [`tokio::sync::Notify`] for async waiting when the pool is empty. The
+//! hot paths — acquiring while buffers are free and releasing while no one is
+//! waiting — are a single CAS each, with no locks.
 #![allow(unsafe_code)]
 
 use std::cell::UnsafeCell;
@@ -10,7 +12,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use tokio::sync::Semaphore;
+use tokio::sync::Notify;
 
 use crate::pcap::packet_header::PacketHeader;
 
@@ -43,16 +45,17 @@ struct BufferPoolInner {
     /// Packed `(head_index: u32, tag: u32)`. The tag increments on every
     /// push/pop to prevent ABA on the index.
     top: AtomicU64,
-    /// Semaphore for async waiting when the pool is exhausted.
-    semaphore: Semaphore,
+    /// Wakes tasks waiting in [`BufferPool::acquire`] when the pool is exhausted.
+    /// When no task is waiting (the common case), notifying is a single atomic op.
+    notify: Notify,
     buffer_size: u32,
     pool_size: usize,
 }
 
 // SAFETY: Access to `slots` is synchronized through the atomic Treiber stack.
 // Each slot is exclusively owned by either the free stack (accessible only via
-// atomic CAS on `top`) or by a `PooledPacket`. The semaphore ensures we never
-// pop from an empty stack.
+// atomic CAS on `top`) or by a `PooledPacket`. `try_pop` checks for the `EMPTY`
+// sentinel, so a slot is only accessed after a successful CAS grants ownership.
 unsafe impl Send for BufferPoolInner {}
 unsafe impl Sync for BufferPoolInner {}
 
@@ -79,59 +82,46 @@ impl BufferPoolInner {
             slots,
             next,
             top: AtomicU64::new(pack(0, 0)),
-            semaphore: Semaphore::new(pool_size),
+            notify: Notify::new(),
             buffer_size,
             pool_size,
         }
     }
 
-    /// Try to pop a buffer from the free stack with a single CAS attempt.
-    ///
-    /// The caller **must** have acquired a semaphore permit first,
-    /// guaranteeing the stack is non-empty. Returns `None` only on
-    /// CAS contention (another thread popped/pushed concurrently).
-    #[inline]
-    fn try_pop(&self) -> Option<(u32, Box<[u8]>)> {
-        let top = self.top.load(Ordering::Acquire);
-        let (idx, tag) = unpack(top);
-        debug_assert_ne!(idx, EMPTY, "try_pop called on empty stack");
-
-        // Read the next pointer. This is safe because:
-        // - `idx` is on the free stack, so no PooledPacket owns it
-        // - The Acquire load on `top` synchronizes with the Release CAS
-        //   from the push that placed `idx` at the head
-        let next_idx = self.next[idx as usize].load(Ordering::Relaxed);
-        let new_top = pack(next_idx, tag.wrapping_add(1));
-
-        if self
-            .top
-            .compare_exchange_weak(top, new_top, Ordering::AcqRel, Ordering::Relaxed)
-            .is_ok()
-        {
-            // SAFETY: The slot is guaranteed to hold Some(buffer) when on the free stack.
-            // The successful CAS gives us exclusive ownership of this slot.
-            let buffer = unsafe { (*self.slots[idx as usize].get()).take().unwrap_unchecked() };
-            Some((idx, buffer))
-        } else {
-            None
-        }
-    }
-
     /// Pop a buffer from the free stack, spinning on CAS contention.
     ///
-    /// Used by the synchronous [`BufferPool::try_acquire`] path where we
-    /// cannot yield to an async executor.
+    /// Returns `None` only when the stack is empty.
     #[inline]
-    fn pop_sync(&self) -> (u32, Box<[u8]>) {
+    fn try_pop(&self) -> Option<(u32, Box<[u8]>)> {
         loop {
-            if let Some(result) = self.try_pop() {
-                return result;
+            let top = self.top.load(Ordering::Acquire);
+            let (idx, tag) = unpack(top);
+            if idx == EMPTY {
+                return None;
+            }
+
+            // Read the next pointer. This is safe because:
+            // - `idx` is on the free stack, so no PooledPacket owns it
+            // - The Acquire load on `top` synchronizes with the Release CAS
+            //   from the push that placed `idx` at the head
+            let next_idx = self.next[idx as usize].load(Ordering::Relaxed);
+            let new_top = pack(next_idx, tag.wrapping_add(1));
+
+            if self
+                .top
+                .compare_exchange_weak(top, new_top, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                // SAFETY: The slot is guaranteed to hold Some(buffer) when on the free stack.
+                // The successful CAS gives us exclusive ownership of this slot.
+                let buffer = unsafe { (*self.slots[idx as usize].get()).take().unwrap_unchecked() };
+                return Some((idx, buffer));
             }
             std::hint::spin_loop();
         }
     }
 
-    /// Push a buffer back onto the free stack and release a semaphore permit.
+    /// Push a buffer back onto the free stack and wake one waiter, if any.
     ///
     /// Called from [`PooledPacket::drop`] which is synchronous, so this must
     /// not await. CAS contention on push is extremely rare (only when multiple
@@ -163,7 +153,37 @@ impl BufferPoolInner {
             std::hint::spin_loop();
         }
 
-        self.semaphore.add_permits(1);
+        // Wake a waiter if one is registered. When no task is waiting this is a
+        // single atomic operation; the stored permit also covers the race where a
+        // waiter registers between our push above and this call.
+        self.notify.notify_one();
+    }
+
+    /// Push a pre-linked chain of slots (`head` -> ... -> `tail` via `next`) onto
+    /// the free stack with a single CAS, then wake one waiter.
+    ///
+    /// The caller must have exclusive ownership of every slot in the chain and
+    /// must have already stored the buffers into their slots.
+    fn push_chain(&self, head: u32, tail: u32) {
+        loop {
+            let top = self.top.load(Ordering::Relaxed);
+            let (old_head, tag) = unpack(top);
+            self.next[tail as usize].store(old_head, Ordering::Relaxed);
+            let new_top = pack(head, tag.wrapping_add(1));
+
+            // Release ordering publishes the slot and chain writes to any thread
+            // that subsequently pops these indices.
+            if self
+                .top
+                .compare_exchange_weak(top, new_top, Ordering::Release, Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
+            }
+            std::hint::spin_loop();
+        }
+
+        self.notify.notify_one();
     }
 }
 
@@ -189,29 +209,32 @@ impl BufferPool {
 
     /// Acquires a buffer from the pool, awaiting if none are available.
     ///
-    /// If the pool is empty, awaits on the semaphore until a buffer is returned.
-    /// On CAS contention (rare), yields to the tokio scheduler instead of
-    /// blocking the executor thread.
+    /// While buffers are free this is a single CAS with no locks or wakeups.
+    /// If the pool is empty, awaits until a buffer is returned.
     ///
-    /// Returns `None` only if the semaphore has been closed (should not happen
-    /// during normal operation).
+    /// Always returns `Some`; the `Option` is kept for API stability.
     pub(crate) async fn acquire(&self) -> Option<(u32, Box<[u8]>)> {
-        let permit = self.inner.semaphore.acquire().await.ok()?;
-        // We manage permit count ourselves via add_permits in push.
-        permit.forget();
-
-        let mut spins = 0u32;
+        if let Some(result) = self.inner.try_pop() {
+            return Some(result);
+        }
         loop {
+            let notified = self.inner.notify.notified();
+            tokio::pin!(notified);
+            // Register interest before re-checking so a push between the failed
+            // pop above and the await below cannot be missed.
+            notified.as_mut().enable();
             if let Some(result) = self.inner.try_pop() {
                 return Some(result);
             }
-            spins += 1;
-            if spins < 4 {
-                std::hint::spin_loop();
-            } else {
-                // Yield to the tokio scheduler so other tasks can make progress.
-                tokio::task::yield_now().await;
-                spins = 0;
+            notified.await;
+            if let Some(result) = self.inner.try_pop() {
+                // A chain return ([BufferPool::recycle]) frees many buffers with a
+                // single wakeup; pass the wakeup along while buffers remain so
+                // other waiters are not stranded.
+                if unpack(self.inner.top.load(Ordering::Relaxed)).0 != EMPTY {
+                    self.inner.notify.notify_one();
+                }
+                return Some(result);
             }
         }
     }
@@ -235,8 +258,50 @@ impl BufferPool {
             header,
             data_len,
             buffer: ManuallyDrop::new(buffer),
-            pool: Arc::clone(&self.inner),
+            pool: ManuallyDrop::new(Arc::clone(&self.inner)),
             slot_index,
+        }
+    }
+
+    /// Returns a batch of packets to the pool with a single atomic splice.
+    ///
+    /// Dropping packets one at a time costs one CAS on the shared stack head (plus
+    /// one waiter wakeup) per packet, which turns into cross-core cache-line
+    /// bouncing when the consumer runs on a different thread than the reader. This
+    /// links the returned buffers into a local chain and pushes the whole chain
+    /// with one CAS and one wakeup.
+    ///
+    /// Packets created by a different pool are returned to their own pool
+    /// individually.
+    pub fn recycle(&self, packets: impl IntoIterator<Item = PooledPacket>) {
+        let mut chain_head = EMPTY;
+        let mut chain_tail = EMPTY;
+        for mut packet in packets {
+            // SAFETY: Both ManuallyDrop fields are taken exactly once here and the
+            // packet is forgotten immediately after, so Drop never runs on it.
+            let buffer = unsafe { ManuallyDrop::take(&mut packet.buffer) };
+            let pool = unsafe { ManuallyDrop::take(&mut packet.pool) };
+            let idx = packet.slot_index;
+            std::mem::forget(packet);
+
+            if !Arc::ptr_eq(&pool, &self.inner) {
+                pool.push(idx, buffer);
+                continue;
+            }
+
+            // SAFETY: We have exclusive ownership of this slot (it was checked out
+            // by the packet we just disassembled).
+            unsafe {
+                *self.inner.slots[idx as usize].get() = Some(buffer);
+            }
+            if chain_head == EMPTY {
+                chain_tail = idx;
+            }
+            self.inner.next[idx as usize].store(chain_head, Ordering::Relaxed);
+            chain_head = idx;
+        }
+        if chain_head != EMPTY {
+            self.inner.push_chain(chain_head, chain_tail);
         }
     }
 
@@ -254,9 +319,7 @@ impl BufferPool {
     ///
     /// Returns `None` if no buffers are currently available.
     pub fn try_acquire(&self) -> Option<(u32, Box<[u8]>)> {
-        let permit = self.inner.semaphore.try_acquire().ok()?;
-        permit.forget();
-        Some(self.inner.pop_sync())
+        self.inner.try_pop()
     }
 }
 
@@ -283,7 +346,7 @@ pub struct PooledPacket {
     header: PacketHeader,
     data_len: usize,
     buffer: ManuallyDrop<Box<[u8]>>,
-    pool: Arc<BufferPoolInner>,
+    pool: ManuallyDrop<Arc<BufferPoolInner>>,
     slot_index: u32,
 }
 impl AsRef<PacketHeader> for PooledPacket {
@@ -316,10 +379,13 @@ impl std::ops::Deref for PooledPacket {
 
 impl Drop for PooledPacket {
     fn drop(&mut self) {
-        // SAFETY: The buffer is always valid from construction until this Drop call.
-        // ManuallyDrop::take is called exactly once here, and no other code takes the buffer.
+        // SAFETY: Both fields are valid from construction until this Drop call.
+        // ManuallyDrop::take is called exactly once for each; the only other code
+        // that takes them ([BufferPool::recycle]) forgets the packet, so Drop
+        // never runs afterwards.
         let buffer = unsafe { ManuallyDrop::take(&mut self.buffer) };
-        self.pool.push(self.slot_index, buffer);
+        let pool = unsafe { ManuallyDrop::take(&mut self.pool) };
+        pool.push(self.slot_index, buffer);
     }
 }
 
@@ -532,6 +598,75 @@ mod tests {
         assert_eq!(packet.header().orig_len, 10);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn recycle_wakes_all_waiters() {
+        // Exhaust the pool, park several waiters, then return everything with a
+        // single recycle() (which issues a single notify_one). The wakeup
+        // forwarding in acquire() must chain-wake every waiter; a lost wakeup
+        // hangs this test.
+        for _ in 0..200 {
+            let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 32);
+            let mut packets = Vec::new();
+            for _ in 0..4 {
+                let (idx, buf) = pool.acquire().await.expect("acquire");
+                packets.push(pool.create_packet(dummy_header(), 0, idx, buf));
+            }
+            let mut waiters = Vec::new();
+            for _ in 0..4 {
+                let pool = pool.clone();
+                waiters.push(tokio::spawn(async move {
+                    let (idx, buf) = pool.acquire().await.expect("acquire from waiter");
+                    // Hold briefly so waiters overlap, then return.
+                    tokio::task::yield_now().await;
+                    pool.return_buffer(idx, buf);
+                }));
+            }
+            tokio::task::yield_now().await;
+            pool.recycle(packets);
+            let all = async {
+                for waiter in waiters {
+                    waiter.await.expect("waiter panicked");
+                }
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(5), all)
+                .await
+                .expect("lost wakeup: waiters hung after recycle");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn mixed_drop_and_recycle_contention() {
+        // Mixed individual drops + batch recycles under heavy contention.
+        let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 32);
+        let mut handles = Vec::new();
+        for t in 0..16 {
+            let pool = pool.clone();
+            handles.push(tokio::spawn(async move {
+                for i in 0..500 {
+                    let (idx, buf) = pool.acquire().await.expect("acquire");
+                    let packet = pool.create_packet(dummy_header(), 0, idx, buf);
+                    if (t + i) % 3 == 0 {
+                        pool.recycle([packet]);
+                    } else {
+                        drop(packet);
+                    }
+                }
+            }));
+        }
+        let all = async {
+            for handle in handles {
+                handle.await.expect("task panicked");
+            }
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(30), all)
+            .await
+            .expect("hung: lost wakeup or stack corruption");
+        for _ in 0..4 {
+            assert!(pool.try_acquire().is_some());
+        }
+        assert!(pool.try_acquire().is_none());
+    }
+
     #[test]
     fn debug_impls() {
         let pool = BufferPool::new(NonZeroUsize::new(2).unwrap(), 128);
@@ -644,6 +779,97 @@ mod tests {
 
         // All 4 buffers should be back
         for _ in 0..4 {
+            assert!(pool.try_acquire().is_some());
+        }
+        assert!(pool.try_acquire().is_none());
+    }
+
+    #[test]
+    fn miri_recycle_returns_all_buffers() {
+        let pool = BufferPool::new(NonZeroUsize::new(4).unwrap(), 64);
+        let mut packets = Vec::new();
+        for i in 0u8..4 {
+            let (idx, mut buf) = pool.try_acquire().expect("acquire");
+            buf[0] = i;
+            packets.push(pool.create_packet(dummy_header(), 1, idx, buf));
+        }
+        assert!(pool.try_acquire().is_none());
+
+        pool.recycle(packets);
+
+        // All 4 buffers must be back, with unique indices, and slots intact.
+        let mut seen = Vec::new();
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            let (idx, buf) = pool.try_acquire().expect("buffer back after recycle");
+            assert_eq!(buf.len(), 64);
+            assert!(!seen.contains(&idx), "duplicate slot index after recycle");
+            seen.push(idx);
+            held.push((idx, buf));
+        }
+        assert!(pool.try_acquire().is_none());
+        for (idx, buf) in held {
+            pool.return_buffer(idx, buf);
+        }
+    }
+
+    #[test]
+    fn miri_recycle_empty_and_single() {
+        let pool = BufferPool::new(NonZeroUsize::new(2).unwrap(), 32);
+        pool.recycle(Vec::new()); // empty iterator: no-op, must not corrupt stack
+        let (idx, buf) = pool.try_acquire().expect("acquire");
+        let packet = pool.create_packet(dummy_header(), 0, idx, buf);
+        pool.recycle([packet]); // single-element chain: head == tail
+        assert!(pool.try_acquire().is_some());
+        assert!(pool.try_acquire().is_some());
+        assert!(pool.try_acquire().is_none());
+    }
+
+    #[test]
+    fn miri_recycle_cross_pool() {
+        let pool_a = BufferPool::new(NonZeroUsize::new(1).unwrap(), 32);
+        let pool_b = BufferPool::new(NonZeroUsize::new(1).unwrap(), 32);
+        let (idx_a, buf_a) = pool_a.try_acquire().expect("acquire a");
+        let (idx_b, buf_b) = pool_b.try_acquire().expect("acquire b");
+        let packet_a = pool_a.create_packet(dummy_header(), 0, idx_a, buf_a);
+        let packet_b = pool_b.create_packet(dummy_header(), 0, idx_b, buf_b);
+        // Recycle both through pool_a: packet_b must land back in pool_b.
+        pool_a.recycle([packet_a, packet_b]);
+        assert!(pool_a.try_acquire().is_some());
+        assert!(pool_b.try_acquire().is_some());
+    }
+
+    #[test]
+    fn miri_recycle_concurrent_threads() {
+        use std::sync::Barrier;
+
+        let pool = BufferPool::new(NonZeroUsize::new(8).unwrap(), 32);
+        let barrier = Arc::new(Barrier::new(4));
+        let mut handles = Vec::new();
+        for _ in 0..4 {
+            let pool = pool.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                for _ in 0..25 {
+                    let mut batch = Vec::new();
+                    for _ in 0..2 {
+                        let (idx, buf) = loop {
+                            if let Some(acquired) = pool.try_acquire() {
+                                break acquired;
+                            }
+                            std::thread::yield_now();
+                        };
+                        batch.push(pool.create_packet(dummy_header(), 0, idx, buf));
+                    }
+                    pool.recycle(batch);
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("thread panicked");
+        }
+        for _ in 0..8 {
             assert!(pool.try_acquire().is_some());
         }
         assert!(pool.try_acquire().is_none());
