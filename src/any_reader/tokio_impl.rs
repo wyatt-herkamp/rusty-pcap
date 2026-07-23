@@ -27,7 +27,7 @@ impl<R: AsyncRead + Unpin> AsyncAnyPcapReaderInner<R> {
             )
         })?;
         if peak.len() < 4 {
-            return Err(std::io::Error::new(
+            Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "Failed to read magic number",
             ))?;

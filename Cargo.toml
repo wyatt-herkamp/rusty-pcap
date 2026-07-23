@@ -50,6 +50,9 @@ harness = false
 name = "parse_async"
 harness = false
 [[bench]]
+name = "parse_ng_async"
+harness = false
+[[bench]]
 name = "pcap_packet_header"
 harness = false
 [package.metadata.docs.rs]

@@ -13,8 +13,10 @@ use thiserror::Error;
 pub use tokio_impl::AsyncPcapReader;
 #[cfg(feature = "tokio-async")]
 pub use tokio_impl::AsyncPooledPcapReader;
+// Re-exported for backward compatibility; the buffer pool now lives in the
+// shared top-level [`crate::buffer_pool`] module (used by pcap and pcap-ng).
 #[cfg(feature = "tokio-async")]
-pub use tokio_impl::buffer_pool::{BufferPool, PooledPacket};
+pub use crate::buffer_pool::{BufferPool, PooledPacket};
 
 use crate::{byte_order::UnexpectedSize, link_type::InvalidLinkType};
 

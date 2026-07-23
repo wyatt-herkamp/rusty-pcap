@@ -3,8 +3,10 @@
 use std::num::NonZeroUsize;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use rusty_pcap::pcap::{AsyncPcapReader, AsyncPooledPcapReader};
+use rusty_pcap::pcap::{AsyncPcapReader, AsyncPooledPcapReader, PooledPacket};
 use tokio::{fs::File, io::BufReader};
+
+const PCAP_FILE: &str = "test_data/test.pcap";
 
 fn parse_with_tokio_async(c: &mut Criterion) {
     c.bench_with_input(
@@ -125,6 +127,103 @@ fn parse_pooled_channel_roundtrip(c: &mut Criterion) {
     group.finish();
 }
 
+/// Batch `recycle` (single atomic splice + one wakeup) vs per-packet drop
+/// (one CAS + wakeup each) when returning buffers from a consumer task.
+async fn recycle_run(chunk: usize, use_recycle: bool) {
+    const POOL: usize = 64;
+    let file = File::open(PCAP_FILE).await.unwrap();
+    let mut reader = AsyncPooledPcapReader::new(file, NonZeroUsize::new(POOL).unwrap())
+        .await
+        .unwrap();
+    let pool = reader.pool().clone();
+    // Keep in-flight (channel + batch) below POOL so the producer never starves.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<PooledPacket>(chunk);
+    let producer = tokio::spawn(async move {
+        while let Ok(Some(packet)) = reader.next_packet().await {
+            if tx.send(packet).await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut batch = Vec::with_capacity(chunk);
+    while let Some(packet) = rx.recv().await {
+        batch.push(packet);
+        if batch.len() == chunk {
+            if use_recycle {
+                pool.recycle(batch.drain(..));
+            } else {
+                batch.clear();
+            }
+        }
+    }
+    if use_recycle {
+        pool.recycle(batch.drain(..));
+    } else {
+        batch.clear();
+    }
+    producer.await.unwrap();
+}
+
+fn parse_pooled_recycle_vs_drop(c: &mut Criterion) {
+    const CHUNK: usize = 16;
+    let mut group = c.benchmark_group("pooled_recycle_vs_drop");
+    group.bench_function("batch_recycle", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap())
+            .iter(|| recycle_run(CHUNK, true))
+    });
+    group.bench_function("individual_drop", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap())
+            .iter(|| recycle_run(CHUNK, false))
+    });
+    group.finish();
+}
+
+/// Fan-out: one producer, N consumers over a flume MPMC channel. Stresses
+/// concurrent buffer returns to the pool from multiple threads.
+fn parse_pooled_fanout(c: &mut Criterion) {
+    const POOL: usize = 32;
+    let mut group = c.benchmark_group("pooled_fanout");
+    for consumers in [1usize, 2, 4] {
+        group.bench_with_input(
+            BenchmarkId::new("consumers", consumers),
+            &consumers,
+            |b, &consumers| {
+                b.to_async(tokio::runtime::Runtime::new().unwrap())
+                    .iter(|| async move {
+                        let file = File::open(PCAP_FILE).await.unwrap();
+                        let mut reader =
+                            AsyncPooledPcapReader::new(file, NonZeroUsize::new(POOL).unwrap())
+                                .await
+                                .unwrap();
+                        let (tx, rx) = flume::bounded::<PooledPacket>(POOL);
+                        let producer = tokio::spawn(async move {
+                            while let Ok(Some(packet)) = reader.next_packet().await {
+                                if tx.send_async(packet).await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                        let mut handles = Vec::with_capacity(consumers);
+                        for _ in 0..consumers {
+                            let rx = rx.clone();
+                            handles.push(tokio::spawn(async move {
+                                while let Ok(packet) = rx.recv_async().await {
+                                    std::hint::black_box(packet.data());
+                                }
+                            }));
+                        }
+                        drop(rx);
+                        producer.await.unwrap();
+                        for handle in handles {
+                            handle.await.unwrap();
+                        }
+                    })
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     parse_with_tokio_async,
@@ -132,5 +231,7 @@ criterion_group!(
     parse_with_pooled_reader,
     parse_pooled_with_buf_reader,
     parse_pooled_channel_roundtrip,
+    parse_pooled_recycle_vs_drop,
+    parse_pooled_fanout,
 );
 criterion_main!(benches);

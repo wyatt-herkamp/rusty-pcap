@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.8.0] (UNRELEASED)
+- Add PCAPNG Pooled Reader (`AsyncPooledPcapNgReader`)
+  - Oversized captured packets grow their pooled buffer on demand instead of erroring (pcap-ng has no global snap length)
+- `PooledPacket` is now generic over its header type (`PooledPacket<H = PacketHeader>`); pcap-ng packets are `PooledNgPacket = PooledPacket<AnyPacketHeader>`
+- Moved the buffer pool to the shared top-level `buffer_pool` module (used by both pcap and pcap-ng); still re-exported from `pcap` for backward compatibility
+- Added async pcap-ng benchmarks and pooled recycle-vs-drop / fan-out benchmarks
+
+
 ## [0.7.1] (2026-07-22)
 - Improved buffer pool performance
 

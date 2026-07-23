@@ -1,0 +1,5 @@
+[alias]
+# Run the Miri-compatible buffer pool tests under Miri (mirrors the CI `miri` job).
+# Usage: cargo +nightly miri-pool
+#   optionally: MIRIFLAGS="-Zmiri-many-seeds=0..16" cargo +nightly miri-pool
+miri-pool = "miri test --lib --features tokio-async miri_"

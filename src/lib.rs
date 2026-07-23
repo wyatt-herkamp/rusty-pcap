@@ -9,6 +9,11 @@ use crate::{
     pcap_ng::PCAP_NG_MAGIC,
 };
 pub mod any_reader;
+/// Lock-free buffer pool shared by the pooled async readers of both file formats.
+///
+/// Requires the `tokio-async` feature.
+#[cfg(feature = "tokio-async")]
+pub mod buffer_pool;
 pub mod byte_order;
 pub mod link_type;
 pub mod pcap;

@@ -7,7 +7,7 @@ use crate::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 
-use super::buffer_pool::{BufferPool, PooledPacket};
+use crate::buffer_pool::{BufferPool, PooledPacket};
 
 /// An async pcap reader that uses a buffer pool for owned packet buffers.
 ///

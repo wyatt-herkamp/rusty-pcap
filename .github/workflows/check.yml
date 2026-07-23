@@ -26,3 +26,15 @@ jobs:
       - uses: actions/checkout@v5
       - name: Clippy
         run: cargo clippy --verbose --all-features
+  miri:
+    runs-on: ubuntu-latest
+    env:
+      # Explore many thread interleavings of the lock-free Treiber stack.
+      MIRIFLAGS: "-Zmiri-many-seeds=0..16"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Miri (buffer pool)
+        run: cargo +nightly miri test --lib --features tokio-async miri_

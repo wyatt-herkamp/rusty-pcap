@@ -4,6 +4,5 @@
 mod reader;
 pub use reader::AsyncPcapReader;
 
-pub mod buffer_pool;
 mod pooled_reader;
 pub use pooled_reader::AsyncPooledPcapReader;

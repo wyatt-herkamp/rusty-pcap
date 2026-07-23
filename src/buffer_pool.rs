@@ -1,4 +1,8 @@
-//! Lock-free buffer pool for async pcap reading with owned packet buffers.
+//! Lock-free buffer pool for async pcap/pcap-ng reading with owned packet buffers.
+//!
+//! Shared by the pooled readers of both file formats
+//! ([`AsyncPooledPcapReader`](crate::pcap::AsyncPooledPcapReader) and
+//! [`AsyncPooledPcapNgReader`](crate::pcap_ng::AsyncPooledPcapNgReader)).
 //!
 //! Uses a Treiber stack (lock-free atomic stack) for O(1) buffer acquire/release
 //! and a [`tokio::sync::Notify`] for async waiting when the pool is empty. The
@@ -247,13 +251,13 @@ impl BufferPool {
     }
 
     /// Creates a [`PooledPacket`] that will return its buffer to this pool on drop.
-    pub(crate) fn create_packet(
+    pub(crate) fn create_packet<H>(
         &self,
-        header: PacketHeader,
+        header: H,
         data_len: usize,
         slot_index: u32,
         buffer: Box<[u8]>,
-    ) -> PooledPacket {
+    ) -> PooledPacket<H> {
         PooledPacket {
             header,
             data_len,
@@ -273,7 +277,7 @@ impl BufferPool {
     ///
     /// Packets created by a different pool are returned to their own pool
     /// individually.
-    pub fn recycle(&self, packets: impl IntoIterator<Item = PooledPacket>) {
+    pub fn recycle<H>(&self, packets: impl IntoIterator<Item = PooledPacket<H>>) {
         let mut chain_head = EMPTY;
         let mut chain_tail = EMPTY;
         for mut packet in packets {
@@ -342,22 +346,26 @@ impl std::fmt::Debug for BufferPool {
 ///
 /// Access packet data via [`data()`](PooledPacket::data) or the
 /// [`Deref<Target=[u8]>`](std::ops::Deref) implementation.
-pub struct PooledPacket {
-    header: PacketHeader,
+///
+/// The header type `H` defaults to [`PacketHeader`] for classic pcap. Other
+/// readers (e.g. the pcap-ng pooled reader) instantiate it with their own owned
+/// header type such as [`AnyPacketHeader`](crate::any_reader::AnyPacketHeader).
+pub struct PooledPacket<H = PacketHeader> {
+    header: H,
     data_len: usize,
     buffer: ManuallyDrop<Box<[u8]>>,
     pool: ManuallyDrop<Arc<BufferPoolInner>>,
     slot_index: u32,
 }
-impl AsRef<PacketHeader> for PooledPacket {
-    fn as_ref(&self) -> &PacketHeader {
+impl<H> AsRef<H> for PooledPacket<H> {
+    fn as_ref(&self) -> &H {
         &self.header
     }
 }
 
-impl PooledPacket {
+impl<H> PooledPacket<H> {
     /// Returns the packet header.
-    pub fn header(&self) -> &PacketHeader {
+    pub fn header(&self) -> &H {
         &self.header
     }
 
@@ -368,7 +376,7 @@ impl PooledPacket {
     }
 }
 
-impl std::ops::Deref for PooledPacket {
+impl<H> std::ops::Deref for PooledPacket<H> {
     type Target = [u8];
 
     #[inline]
@@ -377,7 +385,7 @@ impl std::ops::Deref for PooledPacket {
     }
 }
 
-impl Drop for PooledPacket {
+impl<H> Drop for PooledPacket<H> {
     fn drop(&mut self) {
         // SAFETY: Both fields are valid from construction until this Drop call.
         // ManuallyDrop::take is called exactly once for each; the only other code
@@ -389,7 +397,7 @@ impl Drop for PooledPacket {
     }
 }
 
-impl std::fmt::Debug for PooledPacket {
+impl<H: std::fmt::Debug> std::fmt::Debug for PooledPacket<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PooledPacket")
             .field("header", &self.header)
@@ -398,13 +406,14 @@ impl std::fmt::Debug for PooledPacket {
     }
 }
 
-// SAFETY: All fields are Send + Sync:
-// - PacketHeader is Copy
+// SAFETY: All non-header fields are Send + Sync:
 // - ManuallyDrop<Box<[u8]>> is Send + Sync
 // - Arc<BufferPoolInner> is Send + Sync (we impl'd Send+Sync for BufferPoolInner)
 // - u32 and usize are Send + Sync
-unsafe impl Send for PooledPacket {}
-unsafe impl Sync for PooledPacket {}
+// The header `H` gates the impls: a packet is Send only when its header is Send,
+// and likewise for Sync.
+unsafe impl<H: Send> Send for PooledPacket<H> {}
+unsafe impl<H: Sync> Sync for PooledPacket<H> {}
 
 #[cfg(test)]
 mod tests {
@@ -816,7 +825,7 @@ mod tests {
     #[test]
     fn miri_recycle_empty_and_single() {
         let pool = BufferPool::new(NonZeroUsize::new(2).unwrap(), 32);
-        pool.recycle(Vec::new()); // empty iterator: no-op, must not corrupt stack
+        pool.recycle(Vec::<PooledPacket>::new()); // empty iterator: no-op, must not corrupt stack
         let (idx, buf) = pool.try_acquire().expect("acquire");
         let packet = pool.create_packet(dummy_header(), 0, idx, buf);
         pool.recycle([packet]); // single-element chain: head == tail
